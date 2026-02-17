@@ -1,0 +1,163 @@
+-- [[ SPOTLIGHT MANAGER v1.0 - EL FOCO DE LA FAMA ]]
+-- UBICACIÓN: ServerScriptService -> Script
+
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- === CONFIGURACIÓN ===
+local CENTER_RADIUS = 100      -- Radio de movimiento desde el centro (0,0,0)
+local MOVE_INTERVAL_MIN = 15   -- Tiempo mínimo para moverse
+local MOVE_INTERVAL_MAX = 20   -- Tiempo máximo para moverse
+local ZONE_RADIUS = 12         -- Tamaño del círculo en el suelo
+local REWARD_AMOUNT = 50       -- Dinero por segundo
+local REWARD_TICK = 1.0        -- Frecuencia de pago
+
+-- COLORES DE ESTADO
+local COL_IDLE = Color3.fromRGB(255, 255, 255) -- Blanco: Vacío
+local COL_KING = Color3.fromRGB(0, 255, 100)   -- Verde: Alguien ganando
+local COL_WAR  = Color3.fromRGB(255, 0, 0)     -- Rojo: Conflicto (Anulado)
+
+-- === SETUP VISUAL (EL RIG) ===
+local folder = Instance.new("Folder", workspace)
+folder.Name = "SpotlightEvent"
+
+-- 1. Foco en el aire
+local sourcePart = Instance.new("Part", folder)
+sourcePart.Name = "LightSource"
+sourcePart.Anchored = true
+sourcePart.CanCollide = false
+sourcePart.Transparency = 1
+sourcePart.Position = Vector3.new(0, 25, 0) -- Altura 25
+
+local spotLight = Instance.new("SpotLight", sourcePart)
+spotLight.Angle = 45
+spotLight.Brightness = 20
+spotLight.Range = 60
+spotLight.Face = Enum.NormalId.Bottom
+
+local attSource = Instance.new("Attachment", sourcePart)
+
+-- 2. Zona en el suelo
+local zonePart = Instance.new("Part", folder)
+zonePart.Name = "FameZone"
+zonePart.Anchored = true
+zonePart.CanCollide = false
+zonePart.Transparency = 0.8
+zonePart.Material = Enum.Material.Neon
+zonePart.Color = COL_IDLE
+zonePart.Shape = Enum.PartType.Cylinder
+-- Truco: Los cilindros en Roblox están acostados en X. 
+-- Size = (Altura, Diámetro, Diámetro). Rotamos Z=90 para ponerlo plano.
+zonePart.Size = Vector3.new(1, ZONE_RADIUS*2, ZONE_RADIUS*2) 
+zonePart.CFrame = CFrame.new(0, 1, 0) * CFrame.Angles(0, 0, math.rad(90))
+
+local attZone = Instance.new("Attachment", zonePart)
+
+-- 3. Haz de luz (Beam)
+local beam = Instance.new("Beam", sourcePart)
+beam.Attachment0 = attSource
+beam.Attachment1 = attZone
+beam.FaceCamera = true
+beam.Width0 = 0.5
+beam.Width1 = ZONE_RADIUS * 2
+beam.Color = ColorSequence.new(COL_IDLE)
+beam.Transparency = NumberSequence.new(0.5)
+
+-- 4. Highlight (Para el Rey)
+local kingHighlight = Instance.new("Highlight")
+kingHighlight.Name = "KingHighlight"
+kingHighlight.FillColor = COL_KING
+kingHighlight.OutlineColor = Color3.new(1,1,1)
+kingHighlight.FillTransparency = 0.5
+kingHighlight.OutlineTransparency = 0
+
+-- === LÓGICA DE MOVIMIENTO ===
+local function MoveSpotlight()
+	-- Calcular posición aleatoria en círculo
+	local angle = math.random() * math.pi * 2
+	local r = math.sqrt(math.random()) * CENTER_RADIUS -- Distribución uniforme
+	local x = r * math.cos(angle)
+	local z = r * math.sin(angle)
+	
+	local targetPosZone = Vector3.new(x, 1, z)
+	local targetPosSource = Vector3.new(x, 25, z)
+	
+	-- Tween Info
+	local info = TweenInfo.new(4, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+	
+	-- Mover zona (Manteniendo rotación del cilindro)
+	local goalZone = {CFrame = CFrame.new(targetPosZone) * CFrame.Angles(0, 0, math.rad(90))}
+	TweenService:Create(zonePart, info, goalZone):Play()
+	
+	-- Mover foco
+	local goalSource = {Position = targetPosSource}
+	TweenService:Create(sourcePart, info, goalSource):Play()
+end
+
+-- Bucle de Movimiento independiente
+task.spawn(function()
+	while true do
+		task.wait(math.random(MOVE_INTERVAL_MIN, MOVE_INTERVAL_MAX))
+		MoveSpotlight()
+	end
+end)
+
+-- === LÓGICA DE DETECCIÓN Y PREMIO ===
+task.spawn(function()
+	while true do
+		task.wait(REWARD_TICK)
+		
+		-- 1. Detectar quién está dentro
+		local parts = workspace:GetPartsInPart(zonePart)
+		local playersInside = {}
+		local uniqueCount = 0
+		
+		for _, part in ipairs(parts) do
+			local char = part.Parent
+			local hum = char:FindFirstChild("Humanoid")
+			if hum and hum.Health > 0 then
+				local plr = Players:GetPlayerFromCharacter(char)
+				if plr and not playersInside[plr] then
+					playersInside[plr] = char
+					uniqueCount += 1
+				end
+			end
+		end
+		
+		-- 2. Lógica de Conflicto
+		if uniqueCount == 0 then
+			-- NADIE
+			zonePart.Color = COL_IDLE
+			beam.Color = ColorSequence.new(COL_IDLE)
+			kingHighlight.Parent = nil -- Quitar brillo
+			
+		elseif uniqueCount == 1 then
+			-- REY (Solo uno)
+			local winnerPlr, winnerChar = next(playersInside)
+			
+			-- Efectos Visuales
+			zonePart.Color = COL_KING
+			beam.Color = ColorSequence.new(COL_KING)
+			kingHighlight.Adornee = winnerChar
+			kingHighlight.Parent = winnerChar
+			
+			-- Recompensa
+			if winnerPlr:FindFirstChild("leaderstats") then
+				winnerPlr.leaderstats.Cash.Value += REWARD_AMOUNT
+				
+				-- Feedback visual flotante (Opcional)
+				-- print(winnerPlr.Name .. " gana $"..REWARD_AMOUNT) 
+			end
+			
+		else
+			-- GUERRA (Más de uno)
+			zonePart.Color = COL_WAR
+			beam.Color = ColorSequence.new(COL_WAR)
+			kingHighlight.Parent = nil -- Nadie brilla en la guerra
+			
+			-- Castigo: Nadie gana nada. Opcional: Empujarlos un poco?
+			-- Por ahora, solo anulación de premio.
+		end
+	end
+end)
