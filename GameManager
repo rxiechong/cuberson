@@ -1,94 +1,22 @@
--- [[ VIRAL TYCOON - GAME MANAGER v33.0 (FULL CHAOS INTEGRADO) ]]
+-- [[ VIRAL TYCOON - GAME MANAGER v35.0 (PERSISTENCIA + ECONOMÍA) ]]
 -- UBICACIÓN: ServerScriptService -> Script
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local DataStoreService = game:GetService("DataStoreService")
 local Debris = game:GetService("Debris")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 -- === IMPORTAR CONFIGURACIÓN ===
--- Asegúrate de que el ModuleScript se llame exactamente "GameConfig"
 local ConfigModule = ServerScriptService:WaitForChild("GameConfig")
 local Config = require(ConfigModule)
 
 local SETTINGS = Config.SETTINGS
 local CUBE_TYPES = Config.CUBES
-local MarketplaceService = game:GetService("MarketplaceService")
 
--- === FUNCIÓN JETPACK (Se le da al jugador si tiene GamePass) ===
-function GiveJetpack(player)
-	local success, hasPass = pcall(function() 
-		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, SETTINGS.GAMEPASS_JETPACK_ID) 
-	end)
-
-	if hasPass then
-		local tool = Instance.new("Tool"); tool.Name = "Jetpack"; tool.RequiresHandle = true
-		local handle = Instance.new("Part", tool); handle.Name = "Handle"; handle.Size = Vector3.new(2,2,1); handle.Color = Color3.new(1,0.5,0); handle.Material = Enum.Material.Neon
-
-		-- Script de Vuelo (Incrustado)
-		local localScript = Instance.new("LocalScript", tool)
-		localScript.Source = [[
-            local tool = script.Parent
-            local player = game.Players.LocalPlayer
-            local char = player.Character or player.CharacterAdded:Wait()
-            local hrp = char:WaitForChild("HumanoidRootPart")
-            local UIS = game:GetService("UserInputService")
-            local rs = game:GetService("RunService")
-            
-            local bv = Instance.new("BodyVelocity")
-            bv.MaxForce = Vector3.new(0,0,0); bv.Parent = hrp
-            local flying = false
-            local fuel = 100
-
-            tool.Equipped:Connect(function()
-                UIS.InputBegan:Connect(function(i,g) if not g and i.KeyCode==Enum.KeyCode.Space then flying=true end end)
-                UIS.InputEnded:Connect(function(i) if i.KeyCode==Enum.KeyCode.Space then flying=false end end)
-                
-                rs.RenderStepped:Connect(function()
-                    if flying and fuel > 0 then
-                        bv.MaxForce = Vector3.new(0, 50000, 0); bv.Velocity = Vector3.new(0, 50, 0)
-                        fuel = fuel - 0.5
-                    else
-                        bv.MaxForce = Vector3.new(0,0,0)
-                        if fuel < 100 then fuel = fuel + 0.1 end
-                    end
-                end)
-            end)
-            tool.Unequipped:Connect(function() flying = false; bv.MaxForce = Vector3.new(0,0,0) end)
-        ]]
-		tool.Parent = player.Backpack
-	end
-end
-
--- === PROCESAR COMPRAS (Permablocks) ===
-MarketplaceService.ProcessReceipt = function(receiptInfo)
-	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
-	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
-
-	if receiptInfo.ProductId == SETTINGS.DEV_PRODUCT_PERMABLOCK_ID then
-		local tycoon = towersFolder:FindFirstChild("Tycoon_"..player.UserId)
-		if tycoon then
-			-- Contar cuántos tiene ya
-			local count = 0
-			for _, b in ipairs(tycoon.Blocks:GetChildren()) do if b:GetAttribute("IsPerma") then count += 1 end end
-
-			if count < SETTINGS.MAX_PERMABLOCKS then
-				-- Crear Permablock y dárselo en la mano
-				local data = {Name = "Permablock", Value = 200, Price = 0, Rarity = "ETERNO", Color = Color3.new(1,1,1), Mat = Enum.Material.Neon}
-				local cube = SpawnCube(data)
-
-				-- Forzar recogida inmediata
-				player:SetAttribute("Carrying", true)
-				cube:SetAttribute("Owner", player.UserId)
-				cube.Parent = player.Character
-				PickupCube(player, cube, 200)
-
-				return Enum.ProductPurchaseDecision.PurchaseGranted
-			end
-		end
-	end
-	return Enum.ProductPurchaseDecision.NotProcessedYet
-end
+-- DATASTORE (Para guardar dinero y bloques)
+local ViralDataStore = DataStoreService:GetDataStore("ViralData_v1") 
 
 -- Variables Globales
 local plots = {}
@@ -136,21 +64,15 @@ function CreateStealPrompt(cube)
 	p.Triggered:Connect(function(interactor)
 		local cost = price * 3
 		local isMyCube = (interactor.UserId == originalOwnerId)
-
-		-- Si es TU cubo, es GRATIS recuperarlo
-		if isMyCube then cost = 0 end
+		if isMyCube then cost = 0 end -- Gratis si es tuyo
 
 		if interactor.leaderstats.Cash.Value >= cost then
 			interactor.leaderstats.Cash.Value -= cost
 			p:Destroy() 
-
 			for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
 			cube.Anchored = false
 
-			if isMyCube then
-				print(interactor.Name .. " recuperó su cubo.")
-			end
-
+			if isMyCube then print(interactor.Name .. " recuperó su cubo.") end
 			PickupCube(interactor, cube, cube:GetAttribute("Value"))
 		end
 	end)
@@ -164,7 +86,6 @@ function SpawnCube(customData)
 	cube.Name = data.Name
 	cube.Size = Vector3.new(4,4,4)
 
-	-- LÓGICA JABÓN
 	if data.Name == "Jabón" then 
 		cube.Shape = Enum.PartType.Ball 
 		cube.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0, 0.5, 100, 1) 
@@ -174,10 +95,8 @@ function SpawnCube(customData)
 	cube.Material, cube.Color = data.Mat, data.Color
 	cube:SetAttribute("Owner", 0); cube:SetAttribute("Value", data.Value); cube:SetAttribute("Price", data.Price)
 
-	-- [[ NUEVO: PERMABLOCK ]]
 	if data.Name == "Permablock" then cube:SetAttribute("IsPerma", true) end
 
-	-- [[ NUEVO: GLITCH ]]
 	if data.Name == "Glitch" then
 		task.spawn(function()
 			while cube and cube.Parent do
@@ -188,12 +107,10 @@ function SpawnCube(customData)
 		end)
 	end
 
-	-- LÓGICA ANTIMATERIA
 	if data.Name == "Antimateria" then
 		cube.Touched:Connect(function(hit)
 			if hit:IsA("BasePart") and hit ~= cube then
-				if hit:GetAttribute("IsPerma") then return end -- Inmune
-
+				if hit:GetAttribute("IsPerma") then return end
 				local isOtherCube = hit:GetAttribute("Value") ~= nil or (hit.Parent and (hit.Parent.Name == "Blocks" or hit.Parent.Name == "GlobalCubes"))
 				if isOtherCube then
 					local exp = Instance.new("Explosion"); exp.Position = cube.Position; exp.BlastRadius = 6; exp.BlastPressure = 5000; exp.Parent = workspace
@@ -203,7 +120,7 @@ function SpawnCube(customData)
 		end)
 	end
 
-	-- ETIQUETAS VISUALES
+	-- Etiquetas Visuales
 	local function makeTxt(face, txt, color)
 		local sg = Instance.new("SurfaceGui", cube); sg.Face = face
 		local t = Instance.new("TextLabel", sg); t.Size = UDim2.new(1,0,1,0); t.Text = txt; t.TextScaled = true; t.TextColor3 = color; t.BackgroundTransparency = 1; t.Font = Enum.Font.FredokaOne
@@ -211,7 +128,6 @@ function SpawnCube(customData)
 	end
 	makeTxt(Enum.NormalId.Front, data.Rarity.."\n"..data.Name, Color3.new(1,1,1))
 
-	-- Valor Dinámico (Glitch)
 	local valLabel = makeTxt(Enum.NormalId.Top, "", Color3.new(0,1,0))
 	task.spawn(function()
 		while cube and cube.Parent do
@@ -224,7 +140,6 @@ function SpawnCube(customData)
 
 	local timerLabel = makeTxt(Enum.NormalId.Right, SETTINGS.CUBE_LIFETIME.."s", Color3.new(1,1,0))
 
-	-- TIMER DE VIDA Y NOMBRE DEL DUEÑO
 	task.spawn(function()
 		task.wait(0.2)
 		for i = SETTINGS.CUBE_LIFETIME, 0, -1 do
@@ -234,9 +149,7 @@ function SpawnCube(customData)
 					local ownerName = "ADQUIRIDO"
 					local p = Players:GetPlayerByUserId(ownerId)
 					if p then ownerName = p.Name end
-
-					timerLabel.Text = ownerName
-					timerLabel.TextColor3 = Color3.new(0,1,0)
+					timerLabel.Text = ownerName; timerLabel.TextColor3 = Color3.new(0,1,0)
 				end
 				return 
 			end
@@ -245,7 +158,6 @@ function SpawnCube(customData)
 		if cube and cube.Parent and (cube:GetAttribute("Owner") or 0) == 0 then cube:Destroy() end
 	end)
 
-	-- PROMPT DE COMPRA
 	local prompt = Instance.new("ProximityPrompt", cube); prompt.HoldDuration = 0.1
 	prompt.ActionText = data.Price > 0 and ("COMPRAR $"..data.Price) or "RECOGER"; cube.Parent = globalCubes
 	prompt.Triggered:Connect(function(player)
@@ -253,7 +165,7 @@ function SpawnCube(customData)
 		local owner = cube:GetAttribute("Owner") or 0
 		local cost = (owner == 0) and data.Price or (owner == player.UserId and 0 or (data.Price == 0 and 200 or data.Price * 6))
 
-		if owner == player.UserId then cost = 0 end -- Gratis si es tuyo
+		if owner == player.UserId then cost = 0 end 
 
 		if player.leaderstats.Cash.Value >= cost then
 			player.leaderstats.Cash.Value -= cost
@@ -265,7 +177,132 @@ function SpawnCube(customData)
 	return cube
 end
 
--- === LÓGICA DE SOLTAR (Física Real + Robo) ===
+-- === SISTEMA DE GUARDADO (PERSISTENCIA) ===
+local function SavePlayerData(player)
+	local userId = player.UserId
+	local tycoon = towersFolder:FindFirstChild("Tycoon_"..userId)
+	if not tycoon then return end
+
+	local data = {
+		Cash = player.leaderstats.Cash.Value,
+		Permablocks = {}
+	}
+
+	local origin = tycoon.GridParts.Origin.Position
+	-- Guardamos solo Permablocks (los otros se pierden al salir para evitar lag masivo de datos)
+	for _, b in ipairs(tycoon.Blocks:GetChildren()) do
+		if b:GetAttribute("IsPerma") then
+			local relPos = b.Position - origin
+			table.insert(data.Permablocks, {
+				Pos = {relPos.X, relPos.Y, relPos.Z},
+				Type = b.Name
+			})
+		end
+	end
+
+	local success, err = pcall(function()
+		ViralDataStore:SetAsync("Player_"..userId, data)
+	end)
+	if not success then warn("Error al guardar: "..err) end
+end
+
+local function LoadPlayerData(player)
+	local userId = player.UserId
+	local success, data = pcall(function()
+		return ViralDataStore:GetAsync("Player_"..userId)
+	end)
+
+	if success and data then
+		player.leaderstats.Cash.Value = data.Cash or 1200
+
+		task.spawn(function()
+			-- Esperar a que se asigne tycoon
+			local tycoon = nil
+			repeat task.wait(0.5) tycoon = towersFolder:FindFirstChild("Tycoon_"..userId) until tycoon
+
+			local origin = tycoon.GridParts.Origin.Position
+			if data.Permablocks then
+				for _, pData in ipairs(data.Permablocks) do
+					local pos = Vector3.new(pData.Pos[1], pData.Pos[2], pData.Pos[3]) + origin
+					-- Buscar datos del cubo original en Config
+					local foundData = nil
+					for _, c in ipairs(CUBE_TYPES) do if c.Name == pData.Type then foundData = c break end end
+
+					if foundData then
+						local cube = SpawnCube(foundData) -- Usamos el Spawn normal
+						-- Pero forzamos su posición
+						cube.Position = pos
+						cube.Anchored = true
+						cube.Parent = tycoon.Blocks
+						cube:SetAttribute("Owner", userId) -- Es del jugador
+
+						-- Quitar temporizadores de "caída"
+						if cube:FindFirstChild("ProximityPrompt") then cube.ProximityPrompt:Destroy() end
+					end
+				end
+			end
+		end)
+	end
+end
+
+-- === MONETIZACIÓN & JETPACK ===
+function GiveJetpack(player)
+	local success, hasPass = pcall(function() 
+		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, SETTINGS.GAMEPASS_JETPACK_ID) 
+	end)
+	if hasPass then
+		local tool = Instance.new("Tool"); tool.Name = "Jetpack"; tool.RequiresHandle = true
+		local handle = Instance.new("Part", tool); handle.Name = "Handle"; handle.Size = Vector3.new(2,2,1); handle.Color = Color3.new(1,0.5,0); handle.Material = Enum.Material.Neon
+		local localScript = Instance.new("LocalScript", tool)
+		localScript.Source = [[
+			local tool = script.Parent
+			local player = game.Players.LocalPlayer
+			local char = player.Character or player.CharacterAdded:Wait()
+			local hrp = char:WaitForChild("HumanoidRootPart")
+			local UIS = game:GetService("UserInputService")
+			local rs = game:GetService("RunService")
+			local bv = Instance.new("BodyVelocity"); bv.MaxForce = Vector3.new(0,0,0); bv.Parent = hrp
+			local flying = false; local fuel = 100
+			tool.Equipped:Connect(function()
+				UIS.InputBegan:Connect(function(i,g) if not g and i.KeyCode==Enum.KeyCode.Space then flying=true end end)
+				UIS.InputEnded:Connect(function(i) if i.KeyCode==Enum.KeyCode.Space then flying=false end end)
+				rs.RenderStepped:Connect(function()
+					if flying and fuel > 0 then
+						bv.MaxForce = Vector3.new(0, 50000, 0); bv.Velocity = Vector3.new(0, 50, 0); fuel -= 0.5
+					else
+						bv.MaxForce = Vector3.new(0,0,0); if fuel < 100 then fuel += 0.1 end
+					end
+				end)
+			end)
+			tool.Unequipped:Connect(function() flying = false; bv.MaxForce = Vector3.new(0,0,0) end)
+		]]
+		tool.Parent = player.Backpack
+	end
+end
+
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+	if receiptInfo.ProductId == SETTINGS.DEV_PRODUCT_PERMABLOCK_ID then
+		local tycoon = towersFolder:FindFirstChild("Tycoon_"..player.UserId)
+		if tycoon then
+			local count = 0
+			for _, b in ipairs(tycoon.Blocks:GetChildren()) do if b:GetAttribute("IsPerma") then count += 1 end end
+			if count < SETTINGS.MAX_PERMABLOCKS then
+				local data = {Name = "Permablock", Value = 200, Price = 0, Rarity = "ETERNO", Color = Color3.new(1,1,1), Mat = Enum.Material.Neon}
+				local cube = SpawnCube(data)
+				player:SetAttribute("Carrying", true)
+				cube:SetAttribute("Owner", player.UserId)
+				cube.Parent = player.Character
+				PickupCube(player, cube, 200)
+				return Enum.ProductPurchaseDecision.PurchaseGranted
+			end
+		end
+	end
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
+
+-- === LÓGICA DE COLOCAR CUBOS ===
 placeEvent.OnServerEvent:Connect(function(player, hitPos)
 	local char = player.Character
 	if not char then return end
@@ -333,7 +370,7 @@ placeEvent.OnServerEvent:Connect(function(player, hitPos)
 	if carriedCube:FindFirstChild("ProximityPrompt") then carriedCube.ProximityPrompt.Enabled = true end
 end)
 
--- === GENERACIÓN DE BASES ===
+-- === SETUP BASES & ANDAMIOS ===
 function SetupPlots()
 	local angleStep = (math.pi * 2) / SETTINGS.MAX_PLAYERS
 	for i = 1, SETTINGS.MAX_PLAYERS do
@@ -350,45 +387,16 @@ function SetupPlots()
 		local board = Instance.new("Part", m); board.Size = Vector3.new(18,12,1); board.Anchored = true; board.Name = "Board"; board.Color = Color3.new(0,0,0)
 		local btn = Instance.new("Part", m); btn.Name = "ExpandButton"; btn.Size = Vector3.new(8, 1, 8); btn.Anchored = true; btn.Color = Color3.fromRGB(0, 150, 255); btn.Material = Enum.Material.Neon
 		local rec = Instance.new("Part", m); rec.Name = "Recycler"; rec.Size = Vector3.new(12, 0.5, 12); rec.Anchored = true; rec.Color = Color3.fromRGB(255, 0, 0); rec.Material = Enum.Material.Neon
-		-- [[ NUEVO: BOTÓN DE ANDAMIO ]]
-		m:SetAttribute("ScaffoldHeight", 0) -- Altura inicial
 
+		-- Andamio
+		m:SetAttribute("ScaffoldHeight", 0)
 		local sbtn = Instance.new("Part", m); sbtn.Name = "ScaffoldButton"; sbtn.Size = Vector3.new(6, 1, 6); sbtn.Anchored = true; sbtn.Color = Color3.fromRGB(255, 200, 0); sbtn.Material = Enum.Material.Neon
 
-		-- (Actualiza la función updateAssets para incluir el botón nuevo)
-		local originalUpdate = updateAssets -- Guardamos referencia si es necesario, o mejor modificamos la updateAssets existente:
-
-		-- MODIFICA TU updateAssets ASÍ:
 		local function updateAssets()
 			board.CFrame = base.CFrame * CFrame.new(0, 10, (base.Size.Z/2) + 8)
 			btn.CFrame = base.CFrame * CFrame.new(0, 0, (base.Size.Z/2) + 16)
 			rec.CFrame = base.CFrame * CFrame.new(-(base.Size.X/2 + 10), 0, 0)
-			sbtn.CFrame = base.CFrame * CFrame.new(12, 0, (base.Size.Z/2) + 12) -- Posición del andamio
-		end
-		updateAssets()
-
-		local sp = Instance.new("ProximityPrompt", sbtn)
-		sp.ActionText = "ANDAMIO ($1B)"; sp.HoldDuration = 2
-
-		sp.Triggered:Connect(function(plr)
-			if plr.UserId == m:GetAttribute("OwnerID") and plr.leaderstats.Cash.Value >= SETTINGS.SCAFFOLD_COST then
-				plr.leaderstats.Cash.Value -= SETTINGS.SCAFFOLD_COST
-
-				local currentH = m:GetAttribute("ScaffoldHeight")
-				local scaffold = Instance.new("TrussPart", m)
-				scaffold.Name = "Scaffold"
-				scaffold.Size = Vector3.new(2, 40, 2)
-				scaffold.Anchored = true
-				scaffold.Position = base.Position + Vector3.new(base.Size.X/2 + 4, 20 + currentH, 0)
-				scaffold.Color = Color3.new(0.5,0.5,0.5)
-
-				m:SetAttribute("ScaffoldHeight", currentH + 40)
-			end
-		end)
-		local function updateAssets()
-			board.CFrame = base.CFrame * CFrame.new(0, 10, (base.Size.Z/2) + 8)
-			btn.CFrame = base.CFrame * CFrame.new(0, 0, (base.Size.Z/2) + 16)
-			rec.CFrame = base.CFrame * CFrame.new(-(base.Size.X/2 + 10), 0, 0)
+			sbtn.CFrame = base.CFrame * CFrame.new(12, 0, (base.Size.Z/2) + 12)
 		end
 		updateAssets()
 
@@ -408,12 +416,21 @@ function SetupPlots()
 				local cube = nil
 				for _, c in ipairs(plr.Character:GetChildren()) do if c:IsA("Part") and c:FindFirstChild("CarryingWeld") then cube = c; break end end
 				if cube then
-					-- No reciclar Permablock
-					if cube:GetAttribute("IsPerma") then return end
-
+					if cube:GetAttribute("IsPerma") then return end -- Permablock no se recicla
 					local val = cube:GetAttribute("Value") or 0
 					plr.leaderstats.Cash.Value += math.max(0, math.floor(val * 30)); cube:Destroy(); plr:SetAttribute("Carrying", false)
 				end
+			end
+		end)
+
+		local sp = Instance.new("ProximityPrompt", sbtn); sp.ActionText = "ANDAMIO ($1B)"; sp.HoldDuration = 2
+		sp.Triggered:Connect(function(plr)
+			if plr.UserId == m:GetAttribute("OwnerID") and plr.leaderstats.Cash.Value >= SETTINGS.SCAFFOLD_COST then
+				plr.leaderstats.Cash.Value -= SETTINGS.SCAFFOLD_COST
+				local currentH = m:GetAttribute("ScaffoldHeight")
+				local scaffold = Instance.new("TrussPart", m); scaffold.Name = "Scaffold"; scaffold.Size = Vector3.new(2, 40, 2); scaffold.Anchored = true
+				scaffold.Position = base.Position + Vector3.new(base.Size.X/2 + 4, 20 + currentH, 0); scaffold.Color = Color3.new(0.5,0.5,0.5)
+				m:SetAttribute("ScaffoldHeight", currentH + 40)
 			end
 		end)
 
@@ -425,7 +442,7 @@ function SetupPlots()
 	end
 end
 
--- === BUCLE PRINCIPAL ===
+-- === BUCLE ECONOMÍA ===
 task.spawn(function()
 	while true do
 		task.wait(SETTINGS.PAY_INTERVAL)
@@ -434,106 +451,63 @@ task.spawn(function()
 			if t then
 				local inc, maxH = 0, 0; local origin = t.GridParts.Origin.Position
 				local blks = t:FindFirstChild("Blocks") or Instance.new("Folder", t); blks.Name = "Blocks"
-
 				for _, b in ipairs(blks:GetChildren()) do
 					if (Vector2.new(b.Position.X, b.Position.Z) - Vector2.new(origin.X, origin.Z)).Magnitude < 240 then
-						inc += (b:GetAttribute("Value") or 0)
-						local h = b.Position.Y - origin.Y
-						if h > maxH then maxH = h end
+						inc += (b:GetAttribute("Value") or 0); local h = b.Position.Y - origin.Y; if h > maxH then maxH = h end
 					else 
 						b.Parent = globalCubes; b.Anchored = false
 					end
 				end
-
-				local mult = 1 + (math.floor(maxH/4)*0.5)
-				local totalTick = inc * mult
+				local mult = 1 + (math.floor(maxH/4)*0.5); local totalTick = inc * mult
 				p.leaderstats.Cash.Value = math.max(0, p.leaderstats.Cash.Value + totalTick)
 				p:SetAttribute("MaxH", maxH); p:SetAttribute("Time", (p:GetAttribute("Time") or 0) + 1)
 
-				for _, sg in ipairs(t.Board:GetChildren()) do 
-					if sg:IsA("SurfaceGui") then sg.TextLabel.Text = string.format("%s\n$%.1f/s\n%dft (x%.1f)", p.Name, inc*mult, maxH, mult) end 
-				end
+				for _, sg in ipairs(t.Board:GetChildren()) do if sg:IsA("SurfaceGui") then sg.TextLabel.Text = string.format("%s\n$%.1f/s\n%dft (x%.1f)", p.Name, inc*mult, maxH, mult) end end
 			end
 		end
 	end
 end)
 
--- === MANAGER DE EVENTOS ===
+-- === MANAGER EVENTOS ===
 task.spawn(function()
-	local chaosTimer = 0
-	local celestialTimer = 0
-	local stormTimer = 0
-
+	local chaosTimer, celestialTimer, stormTimer = 0, 0, 0
 	while true do
 		task.wait(1)
-		chaosTimer = chaosTimer + 1
-		celestialTimer = celestialTimer + 1
-		stormTimer = stormTimer + 1
+		chaosTimer += 1; celestialTimer += 1; stormTimer += 1
 
-		-- Evento Caos (5 min)
 		if chaosTimer >= SETTINGS.CHAOS_INTERVAL then 
-			chaosTimer = 0
-			local e = math.random(1,3)
-			if e == 1 then -- Gravedad
-				eventMessage:FireAllClients("⚠ ¡FALLO GRAVEDAD! ⚠")
-				workspace.Gravity = 30; task.wait(45); workspace.Gravity = 196.2
-			elseif e == 2 then -- Velocidad
-				eventMessage:FireAllClients("⚠ ¡SPEED RUN! ⚠")
-				for _,p in ipairs(Players:GetPlayers()) do if p.Character then p.Character.Humanoid.WalkSpeed = 80 end end
-				task.wait(30)
-				for _,p in ipairs(Players:GetPlayers()) do if p.Character then p.Character.Humanoid.WalkSpeed = SETTINGS.PLAYER_SPEED end end
-			elseif e == 3 then -- Yunque
-				eventMessage:FireAllClients("⚠ ¡EL JUICIO DEL YUNQUE! ⚠")
-				task.wait(4)
-				local rich, maxC = nil, -1
-				for _,p in ipairs(Players:GetPlayers()) do if p.leaderstats.Cash.Value > maxC then maxC = p.leaderstats.Cash.Value; rich = p end end
-				if rich and rich.Character then
-					local anvil = Instance.new("Part"); anvil.Size = Vector3.new(12,10,12); anvil.Color = Color3.new(0,0,0); anvil.Position = rich.Character.HumanoidRootPart.Position + Vector3.new(0,100,0)
-					anvil.CustomPhysicalProperties = PhysicalProperties.new(100, 0, 0, 100, 100); anvil.Parent = workspace
-					Debris:AddItem(anvil, 20)
-				end
+			chaosTimer = 0; local e = math.random(1,3)
+			if e == 1 then eventMessage:FireAllClients("⚠ ¡FALLO GRAVEDAD! ⚠"); workspace.Gravity = 30; task.wait(45); workspace.Gravity = 196.2
+			elseif e == 2 then eventMessage:FireAllClients("⚠ ¡SPEED RUN! ⚠"); for _,p in ipairs(Players:GetPlayers()) do if p.Character then p.Character.Humanoid.WalkSpeed = 80 end end; task.wait(30); for _,p in ipairs(Players:GetPlayers()) do if p.Character then p.Character.Humanoid.WalkSpeed = SETTINGS.PLAYER_SPEED end end
+			elseif e == 3 then eventMessage:FireAllClients("⚠ ¡EL JUICIO DEL YUNQUE! ⚠"); task.wait(4); local rich, maxC = nil, -1; for _,p in ipairs(Players:GetPlayers()) do if p.leaderstats.Cash.Value > maxC then maxC = p.leaderstats.Cash.Value; rich = p end end; if rich and rich.Character then local anvil = Instance.new("Part"); anvil.Size = Vector3.new(12,10,12); anvil.Color = Color3.new(0,0,0); anvil.Position = rich.Character.HumanoidRootPart.Position + Vector3.new(0,100,0); anvil.CustomPhysicalProperties = PhysicalProperties.new(100, 0, 0, 100, 100); anvil.Parent = workspace; Debris:AddItem(anvil, 20) end
 			end
 		end
 
-		-- Evento Celestial (5 min, desfasado)
 		if celestialTimer >= (SETTINGS.CELESTIAL_INTERVAL - 20) then
-			celestialTimer = 0
-			local top, maxH = nil, -1
+			celestialTimer = 0; local top, maxH = nil, -1
 			for _,p in ipairs(Players:GetPlayers()) do local h = p:GetAttribute("MaxH") or 0; if h > maxH then maxH = h; top = p end end
 			if top and maxH > 0 then
 				if top.Character then local ff = Instance.new("ForceField", top.Character); Debris:AddItem(ff, 60) end
 				eventMessage:FireAllClients("✨ TRIBUTO PARA "..top.Name.." ✨")
 				local t = towersFolder:FindFirstChild("Tycoon_"..top.UserId)
-				if t then 
-					local ac = SpawnCube({Name="APEX", Value=1000, Price=0, Rarity="GOD", Color=Color3.new(1,1,1), Mat=Enum.Material.Neon})
-					ac.Anchored=true; ac.Position = t.GridParts.Origin.Position + Vector3.new(0, maxH+10, 0); ac.Parent = t.Blocks
-				end
+				if t then local ac = SpawnCube({Name="APEX", Value=1000, Price=0, Rarity="GOD", Color=Color3.new(1,1,1), Mat=Enum.Material.Neon}); ac.Anchored=true; ac.Position = t.GridParts.Origin.Position + Vector3.new(0, maxH+10, 0); ac.Parent = t.Blocks end
 			end
 		end
 
-		-- Evento Tormenta (15 min)
 		if stormTimer >= 900 then
-			stormTimer = 0
-			local topGlobalCube, topGlobalY = nil, -1e9
+			stormTimer = 0; local topGlobalCube, topGlobalY = nil, -1e9
 			for _, tycoon in ipairs(towersFolder:GetChildren()) do
 				local blks = tycoon:FindFirstChild("Blocks")
 				if blks then
 					for _, b in ipairs(blks:GetChildren()) do
-						if b:IsA("Part") and b.Position.Y > topGlobalY then
-							-- Solo Metales
-							if b.Material == Enum.Material.Metal or b.Material == Enum.Material.DiamondPlate then
-								topGlobalY = b.Position.Y; topGlobalCube = b
-							end
-						end
+						if b:IsA("Part") and b.Position.Y > topGlobalY and (b.Material == Enum.Material.Metal or b.Material == Enum.Material.DiamondPlate) then topGlobalY = b.Position.Y; topGlobalCube = b end
 					end
 				end
 			end
 			if topGlobalCube then
-				local msg = Instance.new("Message", workspace); msg.Text = "⚡ RAYO DE ZEUS ⚡\nLa torre de metal más alta ha sido bendecida."; Debris:AddItem(msg, 10)
+				local msg = Instance.new("Message", workspace); msg.Text = "⚡ RAYO DE ZEUS ⚡"; Debris:AddItem(msg, 10)
 				local beam = Instance.new("Part", workspace); beam.Size = Vector3.new(2, 500, 2); beam.Position = topGlobalCube.Position + Vector3.new(0, 250, 0); beam.Anchored = true; beam.CanCollide = false; beam.Color = Color3.new(1,1,1); beam.Material = Enum.Material.Neon; Debris:AddItem(beam, 0.5)
-				local oldVal = topGlobalCube:GetAttribute("Value") or 0
-				topGlobalCube:SetAttribute("Value", oldVal * 8) -- Multiplicador x8
-				topGlobalCube.Color = Color3.fromRGB(0, 255, 255)
+				topGlobalCube:SetAttribute("Value", (topGlobalCube:GetAttribute("Value") or 0) * 8); topGlobalCube.Color = Color3.fromRGB(0, 255, 255)
 			end
 		end
 	end
@@ -547,14 +521,13 @@ Players.PlayerAdded:Connect(function(p)
 	local cash = Instance.new("NumberValue", ls); cash.Name = "Cash"; cash.Value = 1200
 	p:SetAttribute("Carrying", false); p:SetAttribute("Time", 0); p:SetAttribute("MaxH", 0)
 
+	LoadPlayerData(p) -- CARGA DE DATOS
+
 	p.CharacterAdded:Connect(function(char)
-		task.wait(0.5)
-		local hum = char:WaitForChild("Humanoid")
-		local hrp = char:WaitForChild("HumanoidRootPart")
-		hum.WalkSpeed = SETTINGS.PLAYER_SPEED
-		hum.Died:Connect(function() p:SetAttribute("Carrying", false) end)
+		task.wait(0.5); local hum = char:WaitForChild("Humanoid"); local hrp = char:WaitForChild("HumanoidRootPart")
+		hum.WalkSpeed = SETTINGS.PLAYER_SPEED; hum.Died:Connect(function() p:SetAttribute("Carrying", false) end)
 		GiveJetpack(p)
-		-- PLACAJE CON INMUNIDAD
+
 		local tb = false
 		hrp.Touched:Connect(function(hit)
 			if tb then return end
@@ -564,27 +537,28 @@ Players.PlayerAdded:Connect(function(p)
 				local cc = nil
 				for _,c in ipairs(enemy:GetChildren()) do if c:FindFirstChild("CarryingWeld") then cc = c; break end end
 				if cc then
-					-- Si es Permablock, rebota y no lo suelta
-					if cc:GetAttribute("IsPerma") then 
-						tb = false; return 
-					end
-
-					cc:FindFirstChild("CarryingWeld"):Destroy()
-					ePlr:SetAttribute("Carrying", false); cc.CanCollide = true; cc.Anchored = false; cc.Parent = globalCubes
+					if cc:GetAttribute("IsPerma") then tb=false; return end
+					cc:FindFirstChild("CarryingWeld"):Destroy(); ePlr:SetAttribute("Carrying", false); cc.CanCollide = true; cc.Anchored = false; cc.Parent = globalCubes
 					local force = (enemy.HumanoidRootPart.Position - hrp.Position).Unit
-					cc:ApplyImpulse(force * 1500 + Vector3.new(0,800,0))
+					cc:ApplyImpulse(force * 1500 + Vector3.new(0,800,0)); task.wait(3); tb = false
 				end
-				task.wait(3); tb = false
 			end
 		end)
 	end)
 
 	for _, plot in ipairs(plots) do 
 		if not plot.Owner then 
-			plot.Owner = p; plot.Model.Name = "Tycoon_"..p.UserId; plot.Model:SetAttribute("OwnerID", p.UserId) 
-			break 
+			plot.Owner = p; plot.Model.Name = "Tycoon_"..p.UserId; plot.Model:SetAttribute("OwnerID", p.UserId); break 
 		end 
 	end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+	SavePlayerData(p) -- GUARDADO AL SALIR
+end)
+
+game:BindToClose(function()
+	for _, p in ipairs(Players:GetPlayers()) do SavePlayerData(p) end
 end)
 
 task.spawn(function() while true do task.wait(1.5) SpawnCube() end end)
