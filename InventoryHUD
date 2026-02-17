@@ -1,0 +1,157 @@
+-- [[ INVENTORY HUD v1.0 ]]
+-- UBICACIÓN: StarterGui -> LocalScript (Llamar "InventoryHUD")
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+-- Esperar conexiones
+local Remotes = ReplicatedStorage:WaitForChild("ViralRemotes")
+local upgradeFunc = Remotes:WaitForChild("UpgradeInventory")
+local equipEvent = Remotes:WaitForChild("EquipFromInventory")
+local MarketNews = ReplicatedStorage:WaitForChild("MarketNews")
+
+-- === 1. CREAR LA INTERFAZ (GUI) ===
+local sg = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+sg.Name = "ViralHUD"
+sg.ResetOnSpawn = false 
+
+-- FRAME PRINCIPAL (MOCHILA)
+local mainFrame = Instance.new("Frame", sg)
+mainFrame.Name = "BackpackFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 320)
+mainFrame.Position = UDim2.new(0, 10, 0.5, -160) -- Centro Izquierda
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+mainFrame.BorderSizePixel = 0
+local corner = Instance.new("UICorner", mainFrame); corner.CornerRadius = UDim.new(0, 8)
+
+-- TÍTULO
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Text = "MOCHILA"
+title.Font = Enum.Font.FredokaOne
+title.TextSize = 24
+title.TextColor3 = Color3.new(1,1,1)
+
+-- LISTA DE ITEMS (SCROLL)
+local itemsFrame = Instance.new("ScrollingFrame", mainFrame)
+itemsFrame.Size = UDim2.new(1, -20, 1, -100)
+itemsFrame.Position = UDim2.new(0, 10, 0, 40)
+itemsFrame.BackgroundTransparency = 1
+itemsFrame.ScrollBarThickness = 4
+local layout = Instance.new("UIListLayout", itemsFrame); layout.Padding = UDim.new(0, 5)
+
+-- BOTÓN DE MEJORA
+local upBtn = Instance.new("TextButton", mainFrame)
+upBtn.Size = UDim2.new(1, -20, 0, 45)
+upBtn.Position = UDim2.new(0, 10, 1, -55)
+upBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+upBtn.Font = Enum.Font.FredokaOne
+upBtn.TextSize = 16
+upBtn.TextColor3 = Color3.new(1,1,1)
+local btnCorner = Instance.new("UICorner", upBtn); btnCorner.CornerRadius = UDim.new(0, 6)
+
+-- NEWS TICKER (NOTICIAS DE MERCADO)
+local newsBg = Instance.new("Frame", sg)
+newsBg.Size = UDim2.new(0, 300, 0, 30)
+newsBg.Position = UDim2.new(0.5, -150, 0, 10) -- Arriba Centro
+newsBg.BackgroundColor3 = Color3.new(0,0,0)
+newsBg.BackgroundTransparency = 0.5
+local newsCorner = Instance.new("UICorner", newsBg); newsCorner.CornerRadius = UDim.new(1,0)
+
+local newsLabel = Instance.new("TextLabel", newsBg)
+newsLabel.Size = UDim2.new(1,0,1,0)
+newsLabel.BackgroundTransparency = 1
+newsLabel.Text = "Cargando Mercado..."
+newsLabel.TextColor3 = Color3.new(1,1,0)
+newsLabel.Font = Enum.Font.Code
+newsLabel.TextSize = 16
+
+-- === 2. LÓGICA VISUAL ===
+
+local function updateInventory()
+	-- 1. Limpiar lista visual anterior
+	for _, c in ipairs(itemsFrame:GetChildren()) do
+		if c:IsA("TextButton") then c:Destroy() end
+	end
+	
+	-- 2. Leer inventario real del jugador
+	local inv = player:FindFirstChild("Inventory")
+	local maxSlots = player:GetAttribute("MaxSlots") or 4
+	local currentCount = 0
+	
+	if inv then
+		local items = inv:GetChildren()
+		currentCount = #items
+		
+		-- Crear un botón por cada item
+		for i, item in ipairs(items) do
+			local itemBtn = Instance.new("TextButton", itemsFrame)
+			itemBtn.Size = UDim2.new(1, 0, 0, 30)
+			itemBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+			itemBtn.Text = "  " .. item.Name -- Ej: "  Titanio"
+			itemBtn.TextColor3 = Color3.new(1,1,1)
+			itemBtn.Font = Enum.Font.SourceSansBold
+			itemBtn.TextSize = 14
+			itemBtn.TextXAlignment = Enum.TextXAlignment.Left
+			local ic = Instance.new("UICorner", itemBtn); ic.CornerRadius = UDim.new(0,4)
+			
+			-- Al hacer clic en un item, pedir equiparlo
+			itemBtn.MouseButton1Click:Connect(function()
+				equipEvent:FireServer() 
+			end)
+		end
+	end
+	
+	-- 3. Actualizar textos
+	title.Text = "MOCHILA (" .. currentCount .. "/" .. maxSlots .. ")"
+	
+	-- Lógica visual del botón de mejora (Híbrido)
+	if maxSlots < 16 then
+		local cost = 1000 * (maxSlots ^ 2)
+		upBtn.Text = "MEJORAR (+".. 4 ..")\n$" .. cost
+		upBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100) -- Verde Dinero
+	elseif maxSlots < 32 then
+		upBtn.Text = "EXPANDIR (ROBUX)\n💎"
+		upBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) -- Azul Robux
+	else
+		upBtn.Text = "MÁXIMO ALCANZADO"
+		upBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+		upBtn.Active = false
+	end
+end
+
+-- === 3. CONEXIONES ===
+
+-- Actualizar inventario constantemente (por si recoges algo rápido)
+RunService.RenderStepped:Connect(function()
+	if player:FindFirstChild("Inventory") then
+		updateInventory()
+	end
+end)
+
+-- Botón de Mejorar
+upBtn.MouseButton1Click:Connect(function()
+	-- Invocar al servidor para comprar espacio
+	local success, msg = upgradeFunc:InvokeServer()
+	print(msg) 
+end)
+
+-- Escuchar noticias del mercado
+MarketNews.Changed:Connect(function(newVal)
+	newsLabel.Text = newVal
+	
+	-- Efectos de color según la noticia
+	if string.find(newVal, "BOOM") then
+		newsLabel.TextColor3 = Color3.fromRGB(0, 255, 100) -- Verde Matrix
+	elseif string.find(newVal, "CRASH") then
+		newsLabel.TextColor3 = Color3.fromRGB(255, 50, 50) -- Rojo Pánico
+	else
+		newsLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+	end
+end)
+
+-- Inicializar
+newsLabel.Text = MarketNews.Value
