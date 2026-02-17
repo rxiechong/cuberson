@@ -1,0 +1,137 @@
+-- [[ EVENT CLIENT v1.0 ]]
+-- UBICACIÓN: StarterPlayer -> StarterPlayerScripts -> LocalScript
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+local player = Players.LocalPlayer
+
+local Remotes = ReplicatedStorage:WaitForChild("ViralRemotes")
+local startEvent = Remotes:WaitForChild("StartEvent")
+local submitVote = Remotes:WaitForChild("SubmitVote")
+
+-- Efectos Visuales
+local colorCorrect = Instance.new("ColorCorrectionEffect")
+colorCorrect.Name = "GlitchEffect"
+colorCorrect.Parent = Lighting
+colorCorrect.Enabled = false
+
+-- GUI Setup (Creamos la GUI por código para no tener que darte un archivo .rbxm)
+local gui = Instance.new("ScreenGui")
+gui.Name = "EventGUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+-- Frame de Notificación (Arriba)
+local notifyLabel = Instance.new("TextLabel", gui)
+notifyLabel.Size = UDim2.new(1, 0, 0, 50)
+notifyLabel.Position = UDim2.new(0, 0, 0, 20)
+notifyLabel.BackgroundTransparency = 1
+notifyLabel.Font = Enum.Font.FredokaOne
+notifyLabel.TextSize = 40
+notifyLabel.TextColor3 = Color3.new(1, 0, 0)
+notifyLabel.TextStrokeTransparency = 0
+notifyLabel.Text = ""
+notifyLabel.Visible = false
+
+-- Frame de Votación (Centro)
+local voteFrame = Instance.new("Frame", gui)
+voteFrame.Size = UDim2.new(0, 400, 0, 300)
+voteFrame.Position = UDim2.new(0.5, -200, 0.5, -150)
+voteFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+voteFrame.BorderSizePixel = 4
+voteFrame.BorderColor3 = Color3.new(1, 0, 0)
+voteFrame.Visible = false
+
+local voteTitle = Instance.new("TextLabel", voteFrame)
+voteTitle.Size = UDim2.new(1, 0, 0, 50)
+voteTitle.BackgroundTransparency = 1
+voteTitle.Text = "¿QUIÉN DEBE SUFRIR?"
+voteTitle.Font = Enum.Font.Creepster -- Fuente de terror
+voteTitle.TextSize = 35
+voteTitle.TextColor3 = Color3.new(1, 0, 0)
+
+-- Contenedor de botones
+local buttonContainer = Instance.new("Frame", voteFrame)
+buttonContainer.Size = UDim2.new(1, -20, 1, -70)
+buttonContainer.Position = UDim2.new(0, 10, 0, 60)
+buttonContainer.BackgroundTransparency = 1
+
+local function createVoteButton(index, name, userId)
+	local btn = Instance.new("TextButton", buttonContainer)
+	btn.Size = UDim2.new(1, 0, 0, 50)
+	btn.Position = UDim2.new(0, 0, 0, (index-1)*60)
+	btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	btn.Text = name
+	btn.Font = Enum.Font.SourceSansBold
+	btn.TextSize = 24
+	btn.TextColor3 = Color3.new(1, 1, 1)
+
+	btn.MouseButton1Click:Connect(function()
+		submitVote:FireServer(userId)
+		voteFrame.Visible = false -- Ocultar al votar
+		notifyLabel.Text = "HAS CONDENADO A " .. string.upper(name)
+		notifyLabel.Visible = true
+		task.wait(2)
+		notifyLabel.Visible = false
+	end)
+end
+
+-- === LÓGICA DE EVENTOS ===
+
+startEvent.OnClientEvent:Connect(function(mode, duration, extraData)
+	-- Resetear todo primero
+	colorCorrect.Enabled = false
+	notifyLabel.Visible = false
+	voteFrame.Visible = false
+	buttonContainer:ClearAllChildren()
+
+	if mode == "Glitch" then
+		-- Efecto Matrix
+		notifyLabel.Text = "⚠ FALLO DE SISTEMA: GRAVEDAD BAJA ⚠"
+		notifyLabel.TextColor3 = Color3.new(0.6, 0, 1) -- Violeta
+		notifyLabel.Visible = true
+
+		colorCorrect.TintColor = Color3.fromRGB(255, 100, 255) -- Tinte Violeta
+		colorCorrect.Contrast = 0.2
+		colorCorrect.Saturation = -0.5
+		colorCorrect.Enabled = true
+
+		task.wait(duration)
+		notifyLabel.Visible = false
+		colorCorrect.Enabled = false
+
+	elseif mode == "Speed" then
+		notifyLabel.Text = "⚡ SPEED RUN ACTIVADO ⚡"
+		notifyLabel.TextColor3 = Color3.new(0, 1, 1) -- Cyan
+		notifyLabel.Visible = true
+
+		-- Efecto Blur ligero (opcional)
+		local blur = Instance.new("BlurEffect", Lighting)
+		blur.Size = 4
+		task.wait(duration)
+		blur:Destroy()
+		notifyLabel.Visible = false
+
+	elseif mode == "Vote" then
+		-- Setup Votación
+		local candidates = extraData -- Lista de {Name, UserId}
+
+		for i, c in ipairs(candidates) do
+			createVoteButton(i, c.Name, c.UserId)
+		end
+
+		voteFrame.Visible = true
+
+		-- Cuenta regresiva visual en el título
+		task.spawn(function()
+			for i = duration, 0, -1 do
+				if not voteFrame.Visible then break end
+				voteTitle.Text = "¿QUIÉN DEBE SUFRIR? ("..i..")"
+				task.wait(1)
+			end
+			voteFrame.Visible = false
+		end)
+	end
+end)
