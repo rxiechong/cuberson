@@ -86,7 +86,7 @@ local function LoadPlayerData(player)
 	end)
 
 	if success and data then
-		player.leaderstats.Cash.Value = data.Cash or 1200
+		player.leaderstats.Cash.Value = data.Cash or 2000
 		player:SetAttribute("MaxSlots", data.MaxSlots or SETTINGS.BASE_SLOTS)
 
 		-- Reconstruir Permablocks
@@ -504,7 +504,7 @@ function SetupPlots()
 
 		local m = Instance.new("Model", towersFolder); m.Name = "Plot_"..i
 		local gp = Instance.new("Folder", m); gp.Name = "GridParts"
-		local base = Instance.new("Part", gp); base.Name = "Origin"; base.Size = Vector3.new(32,1,32); base.Position = pos; base.Anchored = true; base.Material = Enum.Material.DiamondPlate
+		local base = Instance.new("Part", gp); base.Name = "Origin"; base.Size = Vector3.new(16,1,16); base.Position = pos; base.Anchored = true; base.Material = Enum.Material.DiamondPlate
 		base.CFrame = CFrame.lookAt(pos, Vector3.new(0, 1, 0))
 		m:SetAttribute("OwnerID", 0); m:SetAttribute("Expansions", 0)
 
@@ -529,7 +529,7 @@ function SetupPlots()
 			local count = m:GetAttribute("Expansions")
 			if plr.UserId == m:GetAttribute("OwnerID") and count < SETTINGS.MAX_EXPANSIONS and plr.leaderstats.Cash.Value >= SETTINGS.BASE_EXPAND_COST then
 				plr.leaderstats.Cash.Value -= SETTINGS.BASE_EXPAND_COST
-				m:SetAttribute("Expansions", count + 1); base.Size += Vector3.new(12, 0, 12); updateAssets()
+				m:SetAttribute("Expansions", count + 1); base.Size += Vector3.new(4, 0, 4); updateAssets()
 				if count + 1 >= SETTINGS.MAX_EXPANSIONS then bp.Enabled = false; btn.Transparency = 0.5 end
 			end
 		end)
