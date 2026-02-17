@@ -347,25 +347,38 @@ end)
 -- 4. SPAWN DE CUBOS Y MECÁNICAS (SPYBOX, GLITCH...)
 -- ==========================================================
 
+-- [[ REEMPLAZAR FUNCIÓN CreateStealPrompt ]]
 function CreateStealPrompt(cube)
-	if cube:FindFirstChild("StealPrompt") then return end
+	-- Si ya tiene prompt o es Permablock, no hacer nada
+	if cube:FindFirstChild("StealPrompt") or cube:GetAttribute("IsPerma") then return end
+
 	local price = cube:GetAttribute("Price") or 100
-	local originalOwnerId = cube:GetAttribute("Owner")
+	local stealCost = price * 3
 
 	local p = Instance.new("ProximityPrompt", cube)
-	p.Name = "StealPrompt"; p.ActionText = "ROBAR/RECUPERAR"; p.HoldDuration = 1
+	p.Name = "StealPrompt"
+	p.ActionText = "ROBAR ($".. stealCost ..")"
+	p.HoldDuration = 2 -- Toma tiempo robar
 
 	p.Triggered:Connect(function(interactor)
-		local cost = price * 3
-		if interactor.UserId == originalOwnerId then cost = 0 end -- Gratis si es tuyo
+		-- Verificar que NO sea el dueño (El dueño usa Recoger normal si quiere)
+		if interactor.UserId == cube:GetAttribute("Owner") then return end
 
-		if interactor.leaderstats.Cash.Value >= cost then
-			interactor.leaderstats.Cash.Value -= cost
-			p:Destroy() 
-			-- Romper welds y soltar
+		if interactor.leaderstats.Cash.Value >= stealCost then
+			interactor.leaderstats.Cash.Value -= stealCost
+			p:Destroy() -- Quitar prompt
+
+			-- Liberar cubo físicamente
 			for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
 			cube.Anchored = false
+
+			-- CAMBIAR DUEÑO AL LADRÓN
+			cube:SetAttribute("Owner", interactor.UserId)
+			cube:SetAttribute("TeamOwner", nil) -- Deja de ser del equipo anterior
+
+			-- MANDAR AL INVENTARIO/MANO DEL LADRÓN
 			PickupCube(interactor, cube, cube:GetAttribute("Value"))
+			print(interactor.Name .. " robó un cubo!")
 		end
 	end)
 end
@@ -610,6 +623,7 @@ end)
 -- 6. BASES, ANDAMIOS Y SETUP
 -- ==========================================================
 
+-- [[ REEMPLAZAR FUNCIÓN SetupPlots COMPLETA ]]
 function SetupPlots()
 	local angleStep = (math.pi * 2) / SETTINGS.MAX_PLAYERS
 	for i = 1, SETTINGS.MAX_PLAYERS do
@@ -617,61 +631,83 @@ function SetupPlots()
 		local pos = Vector3.new(math.sin(angle) * SETTINGS.CENTER_DIST, 1, math.cos(angle) * SETTINGS.CENTER_DIST)
 
 		local m = Instance.new("Model", towersFolder); m.Name = "Plot_"..i
-		local gp = Instance.new("Folder", m); gp.Name = "GridParts"
-		local base = Instance.new("Part", gp); base.Name = "Origin"; base.Size = Vector3.new(16,1,16); base.Position = pos; base.Anchored = true; base.Material = Enum.Material.DiamondPlate
-		base.CFrame = CFrame.lookAt(pos, Vector3.new(0, 1, 0))
 		m:SetAttribute("OwnerID", 0); m:SetAttribute("Expansions", 0)
 
+		local gp = Instance.new("Folder", m); gp.Name = "GridParts"
+		local base = Instance.new("Part", gp); base.Name = "Origin"; base.Size = Vector3.new(32,1,32)
+		base.Position = pos; base.Anchored = true; base.Material = Enum.Material.DiamondPlate; base.Color = Color3.fromRGB(20,20,20)
+		base.CFrame = CFrame.lookAt(pos, Vector3.new(0, 1, 0)) -- Mirar al centro
+
+		-- PIZARRA Y BOTONES BÁSICOS
 		local board = Instance.new("Part", m); board.Size = Vector3.new(18,12,1); board.Anchored = true; board.Name = "Board"; board.Color = Color3.new(0,0,0)
-		local btn = Instance.new("Part", m); btn.Name = "ExpandButton"; btn.Size = Vector3.new(8, 1, 8); btn.Anchored = true; btn.Color = Color3.fromRGB(0, 150, 255); btn.Material = Enum.Material.Neon
+		local btnExpand = Instance.new("Part", m); btnExpand.Name = "ExpandButton"; btnExpand.Size = Vector3.new(8, 1, 8); btnExpand.Anchored = true; btnExpand.Color = Color3.fromRGB(0, 150, 255); btnExpand.Material = Enum.Material.Neon
 		local rec = Instance.new("Part", m); rec.Name = "Recycler"; rec.Size = Vector3.new(12, 0.5, 12); rec.Anchored = true; rec.Color = Color3.fromRGB(255, 0, 0); rec.Material = Enum.Material.Neon
 
-		-- Andamio
-		m:SetAttribute("ScaffoldHeight", 0)
-		local sbtn = Instance.new("Part", m); sbtn.Name = "ScaffoldButton"; sbtn.Size = Vector3.new(6, 1, 6); sbtn.Anchored = true; sbtn.Color = Color3.fromRGB(255, 200, 0); sbtn.Material = Enum.Material.Neon
+		-- LOGICA ANDAMIOS TRIPLES (DERECHA, IZQUIERDA, ATRÁS)
+		local scaffoldConfig = {
+			{Name="Right", Dir=base.CFrame.RightVector, Color=Color3.fromRGB(255, 200, 0)},
+			{Name="Left",  Dir=-base.CFrame.RightVector, Color=Color3.fromRGB(255, 150, 0)},
+			{Name="Back",  Dir=-base.CFrame.LookVector,  Color=Color3.fromRGB(200, 100, 0)}
+		}
+
+		for _, sc in ipairs(scaffoldConfig) do
+			m:SetAttribute("ScaffoldH_"..sc.Name, 0) -- Altura independiente
+
+			local sBtn = Instance.new("Part", m); sBtn.Name = "ScaffoldBtn_"..sc.Name
+			sBtn.Size = Vector3.new(4, 1, 4); sBtn.Anchored = true; sBtn.Color = sc.Color; sBtn.Material = Enum.Material.Neon
+			-- Posición relativa: Desde el centro, mover en la dirección (mitad base + margen)
+			sBtn.Position = base.Position + (sc.Dir * (base.Size.X/2 + 6))
+
+			local sp = Instance.new("ProximityPrompt", sBtn)
+			sp.ActionText = "ANDAMIO "..string.upper(sc.Name).." ($"..SETTINGS.SCAFFOLD_COST..")"; sp.HoldDuration = 1
+
+			sp.Triggered:Connect(function(plr)
+				if plr.UserId == m:GetAttribute("OwnerID") and plr.leaderstats.Cash.Value >= SETTINGS.SCAFFOLD_COST then
+					plr.leaderstats.Cash.Value -= SETTINGS.SCAFFOLD_COST
+					local key = "ScaffoldH_"..sc.Name
+					local currentH = m:GetAttribute(key)
+
+					local scaffold = Instance.new("TrussPart", m); scaffold.Name = "Scaffold_"..sc.Name
+					scaffold.Size = Vector3.new(2, 24, 2); scaffold.Anchored = true; scaffold.Color = Color3.new(0.5,0.5,0.5)
+					-- Posicionar torre pegada a la base
+					scaffold.Position = base.Position + (sc.Dir * (base.Size.X/2 + 1)) + Vector3.new(0, 12 + currentH, 0)
+
+					m:SetAttribute(key, currentH + 24)
+				end
+			end)
+		end
 
 		local function updateAssets()
 			board.CFrame = base.CFrame * CFrame.new(0, 10, (base.Size.Z/2) + 8)
-			btn.CFrame = base.CFrame * CFrame.new(0, 0, (base.Size.Z/2) + 16)
+			btnExpand.CFrame = base.CFrame * CFrame.new(0, 0, (base.Size.Z/2) + 16)
 			rec.CFrame = base.CFrame * CFrame.new(-(base.Size.X/2 + 10), 0, 0)
-			sbtn.CFrame = base.CFrame * CFrame.new(12, 0, (base.Size.Z/2) + 12)
 		end
 		updateAssets()
 
-		local bp = Instance.new("ProximityPrompt", btn); bp.ActionText = "EXPANDIR ($"..SETTINGS.BASE_EXPAND_COST..")"; bp.HoldDuration = 1
+		-- PROMPTS DE BASE (Expandir y Reciclar)
+		local bp = Instance.new("ProximityPrompt", btnExpand); bp.ActionText = "EXPANDIR ($"..SETTINGS.BASE_EXPAND_COST..")"
 		bp.Triggered:Connect(function(plr)
 			local count = m:GetAttribute("Expansions")
 			if plr.UserId == m:GetAttribute("OwnerID") and count < SETTINGS.MAX_EXPANSIONS and plr.leaderstats.Cash.Value >= SETTINGS.BASE_EXPAND_COST then
 				plr.leaderstats.Cash.Value -= SETTINGS.BASE_EXPAND_COST
-				m:SetAttribute("Expansions", count + 1); base.Size += Vector3.new(4, 0, 4); updateAssets()
-				if count + 1 >= SETTINGS.MAX_EXPANSIONS then bp.Enabled = false; btn.Transparency = 0.5 end
+				m:SetAttribute("Expansions", count + 1); base.Size += Vector3.new(8, 0, 8); updateAssets()
+				if count + 1 >= SETTINGS.MAX_EXPANSIONS then bp.Enabled = false; btnExpand.Transparency = 0.5 end
 			end
 		end)
 
-		local rp = Instance.new("ProximityPrompt", rec); rp.HoldDuration = 0.2
+		local rp = Instance.new("ProximityPrompt", rec); rp.HoldDuration = 0.2; rp.ActionText = "RECICLAR"
 		rp.Triggered:Connect(function(plr)
 			if plr.UserId == m:GetAttribute("OwnerID") then
-				local cube = nil
-				for _, c in ipairs(plr.Character:GetChildren()) do if c:IsA("Part") and c:FindFirstChild("CarryingWeld") then cube = c; break end end
-				if cube then
-					if cube:GetAttribute("IsPerma") then return end
-					local val = cube:GetAttribute("Value") or 0
-					plr.leaderstats.Cash.Value += math.max(0, math.floor(val * 30)); cube:Destroy(); plr:SetAttribute("Carrying", false)
+				for _, c in ipairs(plr.Character:GetChildren()) do 
+					if c:IsA("Part") and c:FindFirstChild("CarryingWeld") then 
+						if c:GetAttribute("IsPerma") then return end
+						local v = c:GetAttribute("Value") or 0; plr.leaderstats.Cash.Value += math.max(0, math.floor(v*30)); c:Destroy(); plr:SetAttribute("Carrying",false); break 
+					end 
 				end
 			end
 		end)
 
-		local sp = Instance.new("ProximityPrompt", sbtn); sp.ActionText = "ANDAMIO ($1B)"; sp.HoldDuration = 2
-		sp.Triggered:Connect(function(plr)
-			if plr.UserId == m:GetAttribute("OwnerID") and plr.leaderstats.Cash.Value >= SETTINGS.SCAFFOLD_COST then
-				plr.leaderstats.Cash.Value -= SETTINGS.SCAFFOLD_COST
-				local currentH = m:GetAttribute("ScaffoldHeight")
-				local scaffold = Instance.new("TrussPart", m); scaffold.Name = "Scaffold"; scaffold.Size = Vector3.new(2, 40, 2); scaffold.Anchored = true
-				scaffold.Position = base.Position + Vector3.new(base.Size.X/2 + 4, 20 + currentH, 0); scaffold.Color = Color3.new(0.5,0.5,0.5)
-				m:SetAttribute("ScaffoldHeight", currentH + 40)
-			end
-		end)
-
+		-- PIZARRA
 		for _, f in ipairs({Enum.NormalId.Front, Enum.NormalId.Back}) do
 			local sg = Instance.new("SurfaceGui", board); sg.Face = f
 			local t = Instance.new("TextLabel", sg); t.Size = UDim2.new(1,0,1,0); t.Text = "DISPONIBLE"; t.TextScaled = true; t.TextColor3 = Color3.new(1,1,1); t.BackgroundTransparency = 1; t.Font = Enum.Font.FredokaOne
