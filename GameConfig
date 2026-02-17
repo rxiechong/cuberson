@@ -1,0 +1,52 @@
+local Config = {}
+
+-- === CONFIGURACIÓN GLOBAL ===
+Config.SETTINGS = {
+	MAX_PLAYERS = 8,
+	CENTER_DIST = 110,
+	PAY_INTERVAL = 1.0,
+	CUBE_LIFETIME = 120, -- Tiempo antes de desaparecer
+	PLAYER_SPEED = 28,
+	BASE_EXPAND_COST = 500,
+	MAX_EXPANSIONS = 6,
+	TACKLE_SPEED_THRESHOLD = 20,
+	CELESTIAL_INTERVAL = 300, -- 5 minutos
+	CHAOS_INTERVAL = 300      -- 5 minutos
+}
+
+-- === TU LISTA DE CUBOS (DATA) ===
+Config.CUBES = {
+		-- [[ PROGRESIÓN BASE ]]
+		{Name = "Cartón", Value = 0.1, Price = 0, Rarity = "COMÚN", Color = Color3.fromRGB(160,140,100), Mat = Enum.Material.Fabric},
+		{Name = "Madera", Value = 0.5, Price = 30, Rarity = "COMÚN", Color = Color3.fromRGB(105,64,40), Mat = Enum.Material.WoodPlanks},
+		{Name = "Piedra", Value = 2, Price = 120, Rarity = "COMÚN", Color = Color3.fromRGB(100,100,100), Mat = Enum.Material.Slate},
+		{Name = "Hierro", Value = 7, Price = 600, Rarity = "RARO", Color = Color3.fromRGB(180,180,180), Mat = Enum.Material.Metal},
+		{Name = "Plomo", Value = 15, Price = 1800, Rarity = "POCO COMÚN", Color = Color3.fromRGB(70,70,90), Mat = Enum.Material.Metal},
+		{Name = "Oro", Value = 30, Price = 4500, Rarity = "ÉPICO", Color = Color3.fromRGB(255,215,0), Mat = Enum.Material.Foil},
+		{Name = "Gas", Value = 60, Price = 9000, Rarity = "POCO COMÚN", Color = Color3.fromRGB(180,200,0), Mat = Enum.Material.Neon},
+		{Name = "Hielo", Value = 120, Price = 15000, Rarity = "RARO", Color = Color3.fromRGB(150,200,255), Mat = Enum.Material.Ice},
+		{Name = "Diamante", Value = 100, Price = 20000, Rarity = "ÉPICO", Color = Color3.fromRGB(0,255,255), Mat = Enum.Material.Ice},
+		{Name = "Llama", Value = 180, Price = 28000, Rarity = "RARO", Color = Color3.fromRGB(255,100,0), Mat = Enum.Material.Neon},
+		{Name = "Electro", Value = 300, Price = 45000, Rarity = "LEGENDARIO", Color = Color3.fromRGB(0,255,255), Mat = Enum.Material.Neon},
+
+		-- [[ MID / LATE GAME ]]
+		{Name = "Cristal", Value = 400, Price = 60000, Rarity = "ÉPICO", Color = Color3.fromRGB(100,200,255), Mat = Enum.Material.Glass},
+		{Name = "TITANIO", Value = 450, Price = 80000, Rarity = "LEGENDARIO", Color = Color3.fromRGB(80,80,80), Mat = Enum.Material.DiamondPlate},
+		{Name = "Rubí", Value = 650, Price = 120000, Rarity = "LEGENDARIO", Color = Color3.fromRGB(255,0,0), Mat = Enum.Material.Glass},
+		{Name = "Zafiro", Value = 700, Price = 140000, Rarity = "LEGENDARIO", Color = Color3.fromRGB(0,0,255), Mat = Enum.Material.Glass},
+		{Name = "Esmeralda", Value = 850, Price = 180000, Rarity = "LEGENDARIO", Color = Color3.fromRGB(0,255,0), Mat = Enum.Material.Glass},
+		{Name = "Oro Negro", Value = 1200, Price = 300000, Rarity = "ULTRA RARO", Color = Color3.fromRGB(20,20,20), Mat = Enum.Material.Foil},
+
+		-- [[ END GAME / MÍTICOS ]]
+		{Name = "MATERIA OSCURA", Value = 2500, Price = 600000, Rarity = "MÍTICO", Color = Color3.fromRGB(255,0,255), Mat = Enum.Material.Neon},
+		{Name = "Vacío", Value = 4000, Price = 1200000, Rarity = "MÍTICO", Color = Color3.fromRGB(5,5,5), Mat = Enum.Material.Neon},
+
+		-- [[ CUBOS DE SABOTAJE ]]
+		{Name = "Basura", Value = -50, Price = 5000, Rarity = "BASURA", Color = Color3.fromRGB(85,107,47), Mat = Enum.Material.Slate},
+		{Name = "Oro Maldito", Value = -500, Price = 75000, Rarity = "TRAMPA", Color = Color3.fromRGB(200,50,0), Mat = Enum.Material.Foil},
+		{Name = "Antimateria", Value = -2500, Price = 500000, Rarity = "PELIGRO", Color = Color3.fromRGB(0,0,0), Mat = Enum.Material.Neon},
+		{Name = "Jabón", Value = 0, Price = 8000, Rarity = "TRAMPA", Color = Color3.fromRGB(255,200,200), Mat = Enum.Material.Plastic}
+	}
+
+
+return Config
