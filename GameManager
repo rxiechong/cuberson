@@ -553,7 +553,7 @@ Players.PlayerAdded:Connect(function(p)
 		local hrp = char:WaitForChild("HumanoidRootPart")
 		hum.WalkSpeed = SETTINGS.PLAYER_SPEED
 		hum.Died:Connect(function() p:SetAttribute("Carrying", false) end)
-
+		GiveJetpack(p)
 		-- PLACAJE CON INMUNIDAD
 		local tb = false
 		hrp.Touched:Connect(function(hit)
