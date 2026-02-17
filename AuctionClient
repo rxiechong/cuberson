@@ -1,0 +1,140 @@
+-- [[ AUCTION CLIENT v1.0 - CAJA MISTERIOSA ]]
+-- UBICACIÓN: StarterPlayer -> StarterPlayerScripts -> LocalScript
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local player = Players.LocalPlayer
+local pGui = player:WaitForChild("PlayerGui")
+
+local Remotes = ReplicatedStorage:WaitForChild("ViralRemotes")
+local evStart = Remotes:WaitForChild("StartAuction")
+local funcBid = Remotes:WaitForChild("PlaceBid")
+local evResult = Remotes:WaitForChild("AuctionResult")
+
+-- === GUI SETUP (CÓDIGO) ===
+local sg = Instance.new("ScreenGui", pGui); sg.Name = "AuctionGUI"; sg.ResetOnSpawn = false
+
+-- Frame Principal (La Caja Fuerte)
+local frame = Instance.new("Frame", sg)
+frame.Size = UDim2.new(0, 300, 0, 400)
+frame.Position = UDim2.new(0.5, -150, 1.2, 0) -- Empieza abajo (oculto)
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.BorderSizePixel = 4
+frame.BorderColor3 = Color3.new(1, 0.8, 0) -- Dorado
+local corner = Instance.new("UICorner", frame); corner.CornerRadius = UDim.new(0, 15)
+
+-- Imagen Caja
+local img = Instance.new("ImageLabel", frame)
+img.Size = UDim2.new(0, 150, 0, 150)
+img.Position = UDim2.new(0.5, -75, 0, 20)
+img.BackgroundTransparency = 1
+img.Image = "rbxassetid://13009026437" -- Icono Caja Fuerte/Misteriosa genérico
+
+-- Texto Título
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, 0, 0, 40)
+title.Position = UDim2.new(0, 0, 0, 180)
+title.BackgroundTransparency = 1
+title.Text = "¿QUÉ HAY EN LA CAJA?"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.FredokaOne
+title.TextSize = 24
+
+-- Timer
+local timerLbl = Instance.new("TextLabel", frame)
+timerLbl.Size = UDim2.new(1,0,0,30)
+timerLbl.Position = UDim2.new(0,0,0,210)
+timerLbl.BackgroundTransparency = 1
+timerLbl.Text = "00:30"
+timerLbl.TextColor3 = Color3.new(1,0,0)
+timerLbl.Font = Enum.Font.Code; timerLbl.TextSize = 20
+
+-- Input Bid
+local bidInput = Instance.new("TextBox", frame)
+bidInput.Size = UDim2.new(0, 200, 0, 50)
+bidInput.Position = UDim2.new(0.5, -100, 0, 250)
+bidInput.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+bidInput.PlaceholderText = "Ingresa tu oferta..."
+bidInput.Text = ""
+bidInput.Font = Enum.Font.SourceSansBold; bidInput.TextSize = 20
+local ic = Instance.new("UICorner", bidInput); ic.CornerRadius = UDim.new(0,8)
+
+-- Botón Bid
+local bidBtn = Instance.new("TextButton", frame)
+bidBtn.Size = UDim2.new(0, 200, 0, 50)
+bidBtn.Position = UDim2.new(0.5, -100, 0, 310)
+bidBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+bidBtn.Text = "PUJAR ($)"
+bidBtn.TextColor3 = Color3.new(1,1,1)
+bidBtn.Font = Enum.Font.FredokaOne; bidBtn.TextSize = 24
+local bc = Instance.new("UICorner", bidBtn); bc.CornerRadius = UDim.new(0,8)
+
+-- Notificación Superior (Para resultados)
+local notify = Instance.new("TextLabel", sg)
+notify.Size = UDim2.new(1,0,0,60)
+notify.Position = UDim2.new(0,0,0,100)
+notify.BackgroundTransparency = 0.5
+notify.BackgroundColor3 = Color3.new(0,0,0)
+notify.TextColor3 = Color3.new(1,1,1)
+notify.TextScaled = true
+notify.Font = Enum.Font.FredokaOne
+notify.Visible = false
+
+-- === LÓGICA ===
+
+local function ShowAuction(duration)
+	-- Animación Entrada
+	frame.Visible = true
+	bidInput.Text = ""
+	bidBtn.Text = "PUJAR ($)"
+	bidBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+	
+	frame:TweenPosition(UDim2.new(0.5, -150, 0.5, -200), "Out", "Back", 1, true)
+	
+	-- Timer
+	task.spawn(function()
+		for i = duration, 0, -1 do
+			timerLbl.Text = "TIEMPO: " .. i .. "s"
+			if i <= 5 then timerLbl.TextColor3 = Color3.new(1,0,0) else timerLbl.TextColor3 = Color3.new(1,1,1) end
+			task.wait(1)
+		end
+		-- Salida
+		frame:TweenPosition(UDim2.new(0.5, -150, 1.2, 0), "In", "Quad", 0.5, true)
+	end)
+end
+
+evStart.OnClientEvent:Connect(ShowAuction)
+
+bidBtn.MouseButton1Click:Connect(function()
+	local amount = tonumber(bidInput.Text)
+	if amount and amount > 0 then
+		local success, msg = funcBid:InvokeServer(amount)
+		if success then
+			bidBtn.Text = "OFRECIDO: $" .. amount
+			bidBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+		else
+			bidBtn.Text = "ERROR: " .. msg
+			bidBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+			task.wait(1)
+			bidBtn.Text = "PUJAR ($)"
+			bidBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+		end
+	else
+		bidBtn.Text = "NÚMERO INVÁLIDO"
+		task.wait(1)
+		bidBtn.Text = "PUJAR ($)"
+	end
+end)
+
+evResult.OnClientEvent:Connect(function(msg, category)
+	notify.Text = msg
+	if category == "GOOD" then notify.TextColor3 = Color3.new(0,1,0)
+	elseif category == "TROLL" then notify.TextColor3 = Color3.new(1,0.5,0) -- Naranja
+	elseif category == "CHAOS" then notify.TextColor3 = Color3.new(1,0,0) -- Rojo
+	end
+	
+	notify.Visible = true
+	task.wait(6)
+	notify.Visible = false
+end)
