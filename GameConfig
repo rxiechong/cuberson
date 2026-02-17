@@ -23,7 +23,13 @@ Config.SETTINGS = {
 	-- [[ IDs DE ROBLOX ]]
 	DEV_PRODUCT_PERMABLOCK_ID = 12345678, 
 	DEV_PRODUCT_SLOTS_ID = 11111111, -- ¡PON TU ID REAL AQUÍ!
-	GAMEPASS_JETPACK_ID = 12345678
+	GAMEPASS_JETPACK_ID = 12345678,
+	-- [[ GUERRA DE EQUIPOS (V39) ]]
+	TEAMS = {
+		BLUE = {Name = "Equipo Azul", Color = Color3.fromRGB(0, 100, 255), AltarPos = Vector3.new(-250, 2, 0)},
+		RED =  {Name = "Equipo Rojo", Color = Color3.fromRGB(255, 50, 50),  AltarPos = Vector3.new(250, 2, 0)}
+	},
+	ALTAR_RADIUS = 30 -- Tamaño de la zona del fondo común
 }
 
 -- === TU LISTA DE CUBOS (DATA) ===
