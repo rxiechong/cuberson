@@ -13,6 +13,82 @@ local Config = require(ConfigModule)
 
 local SETTINGS = Config.SETTINGS
 local CUBE_TYPES = Config.CUBES
+local MarketplaceService = game:GetService("MarketplaceService")
+
+-- === FUNCIÓN JETPACK (Se le da al jugador si tiene GamePass) ===
+function GiveJetpack(player)
+	local success, hasPass = pcall(function() 
+		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, SETTINGS.GAMEPASS_JETPACK_ID) 
+	end)
+
+	if hasPass then
+		local tool = Instance.new("Tool"); tool.Name = "Jetpack"; tool.RequiresHandle = true
+		local handle = Instance.new("Part", tool); handle.Name = "Handle"; handle.Size = Vector3.new(2,2,1); handle.Color = Color3.new(1,0.5,0); handle.Material = Enum.Material.Neon
+
+		-- Script de Vuelo (Incrustado)
+		local localScript = Instance.new("LocalScript", tool)
+		localScript.Source = [[
+            local tool = script.Parent
+            local player = game.Players.LocalPlayer
+            local char = player.Character or player.CharacterAdded:Wait()
+            local hrp = char:WaitForChild("HumanoidRootPart")
+            local UIS = game:GetService("UserInputService")
+            local rs = game:GetService("RunService")
+            
+            local bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(0,0,0); bv.Parent = hrp
+            local flying = false
+            local fuel = 100
+
+            tool.Equipped:Connect(function()
+                UIS.InputBegan:Connect(function(i,g) if not g and i.KeyCode==Enum.KeyCode.Space then flying=true end end)
+                UIS.InputEnded:Connect(function(i) if i.KeyCode==Enum.KeyCode.Space then flying=false end end)
+                
+                rs.RenderStepped:Connect(function()
+                    if flying and fuel > 0 then
+                        bv.MaxForce = Vector3.new(0, 50000, 0); bv.Velocity = Vector3.new(0, 50, 0)
+                        fuel = fuel - 0.5
+                    else
+                        bv.MaxForce = Vector3.new(0,0,0)
+                        if fuel < 100 then fuel = fuel + 0.1 end
+                    end
+                end)
+            end)
+            tool.Unequipped:Connect(function() flying = false; bv.MaxForce = Vector3.new(0,0,0) end)
+        ]]
+		tool.Parent = player.Backpack
+	end
+end
+
+-- === PROCESAR COMPRAS (Permablocks) ===
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+
+	if receiptInfo.ProductId == SETTINGS.DEV_PRODUCT_PERMABLOCK_ID then
+		local tycoon = towersFolder:FindFirstChild("Tycoon_"..player.UserId)
+		if tycoon then
+			-- Contar cuántos tiene ya
+			local count = 0
+			for _, b in ipairs(tycoon.Blocks:GetChildren()) do if b:GetAttribute("IsPerma") then count += 1 end end
+
+			if count < SETTINGS.MAX_PERMABLOCKS then
+				-- Crear Permablock y dárselo en la mano
+				local data = {Name = "Permablock", Value = 200, Price = 0, Rarity = "ETERNO", Color = Color3.new(1,1,1), Mat = Enum.Material.Neon}
+				local cube = SpawnCube(data)
+
+				-- Forzar recogida inmediata
+				player:SetAttribute("Carrying", true)
+				cube:SetAttribute("Owner", player.UserId)
+				cube.Parent = player.Character
+				PickupCube(player, cube, 200)
+
+				return Enum.ProductPurchaseDecision.PurchaseGranted
+			end
+		end
+	end
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
 
 -- Variables Globales
 local plots = {}
@@ -274,7 +350,41 @@ function SetupPlots()
 		local board = Instance.new("Part", m); board.Size = Vector3.new(18,12,1); board.Anchored = true; board.Name = "Board"; board.Color = Color3.new(0,0,0)
 		local btn = Instance.new("Part", m); btn.Name = "ExpandButton"; btn.Size = Vector3.new(8, 1, 8); btn.Anchored = true; btn.Color = Color3.fromRGB(0, 150, 255); btn.Material = Enum.Material.Neon
 		local rec = Instance.new("Part", m); rec.Name = "Recycler"; rec.Size = Vector3.new(12, 0.5, 12); rec.Anchored = true; rec.Color = Color3.fromRGB(255, 0, 0); rec.Material = Enum.Material.Neon
+		-- [[ NUEVO: BOTÓN DE ANDAMIO ]]
+		m:SetAttribute("ScaffoldHeight", 0) -- Altura inicial
 
+		local sbtn = Instance.new("Part", m); sbtn.Name = "ScaffoldButton"; sbtn.Size = Vector3.new(6, 1, 6); sbtn.Anchored = true; sbtn.Color = Color3.fromRGB(255, 200, 0); sbtn.Material = Enum.Material.Neon
+
+		-- (Actualiza la función updateAssets para incluir el botón nuevo)
+		local originalUpdate = updateAssets -- Guardamos referencia si es necesario, o mejor modificamos la updateAssets existente:
+
+		-- MODIFICA TU updateAssets ASÍ:
+		local function updateAssets()
+			board.CFrame = base.CFrame * CFrame.new(0, 10, (base.Size.Z/2) + 8)
+			btn.CFrame = base.CFrame * CFrame.new(0, 0, (base.Size.Z/2) + 16)
+			rec.CFrame = base.CFrame * CFrame.new(-(base.Size.X/2 + 10), 0, 0)
+			sbtn.CFrame = base.CFrame * CFrame.new(12, 0, (base.Size.Z/2) + 12) -- Posición del andamio
+		end
+		updateAssets()
+
+		local sp = Instance.new("ProximityPrompt", sbtn)
+		sp.ActionText = "ANDAMIO ($1B)"; sp.HoldDuration = 2
+
+		sp.Triggered:Connect(function(plr)
+			if plr.UserId == m:GetAttribute("OwnerID") and plr.leaderstats.Cash.Value >= SETTINGS.SCAFFOLD_COST then
+				plr.leaderstats.Cash.Value -= SETTINGS.SCAFFOLD_COST
+
+				local currentH = m:GetAttribute("ScaffoldHeight")
+				local scaffold = Instance.new("TrussPart", m)
+				scaffold.Name = "Scaffold"
+				scaffold.Size = Vector3.new(2, 40, 2)
+				scaffold.Anchored = true
+				scaffold.Position = base.Position + Vector3.new(base.Size.X/2 + 4, 20 + currentH, 0)
+				scaffold.Color = Color3.new(0.5,0.5,0.5)
+
+				m:SetAttribute("ScaffoldHeight", currentH + 40)
+			end
+		end)
 		local function updateAssets()
 			board.CFrame = base.CFrame * CFrame.new(0, 10, (base.Size.Z/2) + 8)
 			btn.CFrame = base.CFrame * CFrame.new(0, 0, (base.Size.Z/2) + 16)
