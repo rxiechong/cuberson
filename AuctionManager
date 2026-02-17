@@ -1,0 +1,170 @@
+-- [[ AUCTION MANAGER v1.0 - LA SUBASTA CIEGA ]]
+-- UBICACIÓN: ServerScriptService -> Script
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
+
+-- === CONFIGURACIÓN ===
+local AUCTION_INTERVAL = 600 -- 10 Minutos
+local BID_TIME = 30 -- Tiempo para pujar
+
+-- PREMIOS (Pool)
+local PRIZES = {
+	GOOD = {Chance = 40, Items = {"TITANIO", "Diamante"}},
+	TROLL = {Chance = 40, Items = {"BASURA", "NOTA_ESTAFA"}},
+	CHAOS = {Chance = 20, Items = {"BOMBA"}}
+}
+
+-- === SETUP RED ===
+local Remotes = ReplicatedStorage:FindFirstChild("ViralRemotes") or Instance.new("Folder", ReplicatedStorage)
+Remotes.Name = "ViralRemotes"
+
+local evStartAuction = Remotes:FindFirstChild("StartAuction") or Instance.new("RemoteEvent", Remotes)
+evStartAuction.Name = "StartAuction"
+local evPlaceBid = Remotes:FindFirstChild("PlaceBid") or Instance.new("RemoteFunction", Remotes)
+evPlaceBid.Name = "PlaceBid"
+local evAuctionResult = Remotes:FindFirstChild("AuctionResult") or Instance.new("RemoteEvent", Remotes)
+evAuctionResult.Name = "AuctionResult"
+
+-- Estado
+local activeBids = {} -- {UserId = Monto}
+local auctionOpen = false
+
+-- === FUNCIONES DE PREMIOS ===
+
+local function SpawnPrize(winner, prizeType, prizeName)
+	local char = winner.Character
+	if not char then return end
+
+	local pos = char.HumanoidRootPart.Position + Vector3.new(0, 10, 0)
+	local prizePart = Instance.new("Part")
+	prizePart.Size = Vector3.new(4,4,4)
+	prizePart.Position = pos
+	prizePart.Anchored = false
+	prizePart.Parent = Workspace
+
+	-- Configurar Apariencia/Lógica según tipo
+	if prizeName == "TITANIO" then
+		prizePart.Name = "Titanio"; prizePart.Color = Color3.fromRGB(80,80,80); prizePart.Material = Enum.Material.DiamondPlate
+		prizePart:SetAttribute("Value", 450); prizePart:SetAttribute("Owner", winner.UserId)
+
+	elseif prizeName == "Diamante" then
+		prizePart.Name = "Diamante"; prizePart.Color = Color3.fromRGB(0,255,255); prizePart.Material = Enum.Material.Ice
+		prizePart:SetAttribute("Value", 100); prizePart:SetAttribute("Owner", winner.UserId)
+
+	elseif prizeName == "BASURA" then
+		prizePart.Name = "Basura"; prizePart.Color = Color3.fromRGB(85,107,47); prizePart.Material = Enum.Material.Slate
+		prizePart:SetAttribute("Value", -50); prizePart:SetAttribute("Owner", winner.UserId)
+
+	elseif prizeName == "NOTA_ESTAFA" then
+		prizePart.Name = "Nota"; prizePart.Size = Vector3.new(2, 0.1, 2); prizePart.Color = Color3.new(1,1,1)
+		local sg = Instance.new("SurfaceGui", prizePart); sg.Face = Enum.NormalId.Top
+		local t = Instance.new("TextLabel", sg); t.Size = UDim2.new(1,0,1,0); t.Text = "xD te estafaron :("; t.TextScaled = true
+		prizePart:SetAttribute("Value", 0)
+
+	elseif prizeName == "BOMBA" then
+		prizePart.Name = "Cubo Bomba"; prizePart.Color = Color3.new(0,0,0); prizePart.Material = Enum.Material.Neon
+		prizePart.BrickColor = BrickColor.new("Really black")
+		-- Lógica Explosiva
+		local s = Instance.new("Sound", prizePart); s.SoundId = "rbxassetid://163619849"; s.Looped = true; s:Play()
+
+		prizePart.Touched:Connect(function(hit)
+			if hit.Parent and hit.Parent:FindFirstChild("Humanoid") then
+				local exp = Instance.new("Explosion")
+				exp.Position = prizePart.Position
+				exp.BlastRadius = 10
+				exp.BlastPressure = 500000
+				exp.Parent = Workspace
+				prizePart:Destroy()
+			end
+		end)
+	end
+
+	-- Intentar meter al sistema de Tycoon (Prompt de recoger)
+	-- Esto asegura que se pueda interactuar como un cubo normal (si no es bomba)
+	if prizeName ~= "BOMBA" then
+		local p = Instance.new("ProximityPrompt", prizePart)
+		p.ActionText = "RECOGER PREMIO"; p.HoldDuration = 0.5
+		p.Triggered:Connect(function(plr)
+			if plr == winner then
+				prizePart.CanCollide = false; prizePart.Anchored = false
+				prizePart.Parent = plr.Character -- Lo toma en la mano
+				local w = Instance.new("WeldConstraint", prizePart)
+				w.Part0 = plr.Character.HumanoidRootPart; w.Part1 = prizePart
+				p:Destroy()
+			end
+		end)
+	end
+end
+
+-- === LÓGICA DE SUBASTA ===
+
+evPlaceBid.OnServerInvoke = function(player, amount)
+	if not auctionOpen then return false, "Subasta cerrada" end
+	if amount <= 0 then return false, "Monto inválido" end
+
+	if player.leaderstats.Cash.Value >= amount then
+		-- Actualizar puja (solo si es mayor a su anterior, aunque aquí permitimos reajustar)
+		activeBids[player.UserId] = amount
+		return true, "Puja de $"..amount.." aceptada"
+	else
+		return false, "Dinero insuficiente"
+	end
+end
+
+-- Bucle Principal
+task.spawn(function()
+	while true do
+		task.wait(AUCTION_INTERVAL) -- Esperar 10 min
+
+		-- 1. Iniciar
+		auctionOpen = true
+		activeBids = {}
+		print("💰 SUBASTA INICIADA")
+		evStartAuction:FireAllClients(BID_TIME)
+
+		task.wait(BID_TIME)
+		auctionOpen = false
+
+		-- 2. Determinar Ganador
+		local winnerId = nil
+		local highestBid = -1
+
+		for uid, bid in pairs(activeBids) do
+			if bid > highestBid then
+				-- Validación final de fondos (por si gastó el dinero mientras pujaba)
+				local p = Players:GetPlayerByUserId(uid)
+				if p and p.leaderstats.Cash.Value >= bid then
+					highestBid = bid
+					winnerId = uid
+				end
+			end
+		end
+
+		-- 3. Entregar Premio
+		if winnerId then
+			local winner = Players:GetPlayerByUserId(winnerId)
+			if winner then
+				-- Cobrar
+				winner.leaderstats.Cash.Value -= highestBid
+
+				-- Elegir Premio (Pool)
+				local roll = math.random(1, 100)
+				local category = (roll <= 40) and "GOOD" or ((roll <= 80) and "TROLL" or "CHAOS")
+				local items = PRIZES[category].Items
+				local specificItem = items[math.random(1, #items)]
+
+				-- Spawnear
+				SpawnPrize(winner, category, specificItem)
+
+				-- Anunciar
+				local msg = string.format("%s pagó $%s y recibió... ¡%s!", winner.Name, highestBid, specificItem)
+				evAuctionResult:FireAllClients(msg, category) -- Category define el color del mensaje
+			end
+		else
+			evAuctionResult:FireAllClients("Nadie ganó la subasta.", "TROLL")
+		end
+	end
+end)
