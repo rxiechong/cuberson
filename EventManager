@@ -1,0 +1,191 @@
+-- [[ EVENT MANAGER v1.0 ]]
+-- UBICACIÓN: ServerScriptService -> Script (Llamar "EventManager")
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+local Workspace = game:GetService("Workspace")
+
+-- Setup Remotes
+local Remotes = ReplicatedStorage:FindFirstChild("ViralRemotes") or Instance.new("Folder", ReplicatedStorage)
+Remotes.Name = "ViralRemotes"
+local startEventRemote = Remotes:FindFirstChild("StartEvent") or Instance.new("RemoteEvent", Remotes)
+startEventRemote.Name = "StartEvent"
+local submitVoteRemote = Remotes:FindFirstChild("SubmitVote") or Instance.new("RemoteEvent", Remotes)
+submitVoteRemote.Name = "SubmitVote"
+
+-- Configuración
+local DEFAULT_GRAVITY = 196.2
+local LOW_GRAVITY = 40
+local BASE_SPEED = 28 -- Sincronizado con tu GameConfig
+local EVENT_INTERVAL_MIN = 300 -- 5 min
+local EVENT_INTERVAL_MAX = 480 -- 8 min
+
+-- Variables de Votación
+local currentVotes = {}
+local isVotingActive = false
+
+-- === FUNCIONES DE EVENTOS ===
+
+local function Event_GravityGlitch()
+	-- Notificar Clientes (Visual)
+	startEventRemote:FireAllClients("Glitch", 60)
+	print("⚠ EVENTO: FALLO DE GRAVEDAD")
+	
+	Workspace.Gravity = LOW_GRAVITY
+	
+	task.wait(60)
+	
+	Workspace.Gravity = DEFAULT_GRAVITY
+	startEventRemote:FireAllClients("Reset", 0)
+end
+
+local function Event_SpeedRun()
+	startEventRemote:FireAllClients("Speed", 45)
+	print("⚠ EVENTO: SPEED RUN")
+	
+	-- Aplicar velocidad
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character and p.Character:FindFirstChild("Humanoid") then
+			p.Character.Humanoid.WalkSpeed = 100 -- Aprox 4x
+			p.Character.Humanoid.JumpPower = 100 -- Aprox 2x
+		end
+	end
+	
+	task.wait(45)
+	
+	-- Resetear
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character and p.Character:FindFirstChild("Humanoid") then
+			p.Character.Humanoid.WalkSpeed = BASE_SPEED
+			p.Character.Humanoid.JumpPower = 50
+		end
+	end
+	startEventRemote:FireAllClients("Reset", 0)
+end
+
+local function Event_DemocracyOfHate()
+	-- 1. Buscar Candidatos (Top 3 Ricos)
+	local candidates = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		local cash = p:FindFirstChild("leaderstats") and p.leaderstats:FindFirstChild("Cash")
+		if cash then
+			table.insert(candidates, {Player = p, Cash = cash.Value})
+		end
+	end
+	
+	-- Ordenar por dinero descendente
+	table.sort(candidates, function(a, b) return a.Cash > b.Cash end)
+	
+	-- Seleccionar top 3
+	local top3 = {}
+	for i = 1, math.min(3, #candidates) do
+		table.insert(top3, candidates[i].Player)
+	end
+	
+	if #top3 == 0 then return end -- No hay jugadores
+	
+	-- 2. Iniciar Votación
+	print("⚠ EVENTO: DEMOCRACIA DEL ODIO")
+	currentVotes = {}
+	for _, p in ipairs(top3) do currentVotes[p.UserId] = 0 end
+	isVotingActive = true
+	
+	-- Enviar nombres al cliente para la GUI
+	local names = {}
+	for _, p in ipairs(top3) do table.insert(names, {Name = p.Name, UserId = p.UserId}) end
+	startEventRemote:FireAllClients("Vote", 15, names)
+	
+	task.wait(15) -- Tiempo de votación
+	isVotingActive = false
+	
+	-- 3. Conteo
+	local winnerId = nil
+	local maxVotes = -1
+	
+	for userId, count in pairs(currentVotes) do
+		if count > maxVotes then
+			maxVotes = count
+			winnerId = userId
+		end
+	end
+	
+	-- 4. EL CASTIGO (Yunque)
+	local victim = Players:GetPlayerByUserId(winnerId)
+	if victim then
+		local tycoon = Workspace:FindFirstChild("Towers") and Workspace.Towers:FindFirstChild("Tycoon_"..victim.UserId)
+		local targetPos = nil
+		
+		-- Lógica Crítica de Posición
+		if tycoon and tycoon:FindFirstChild("Blocks") then
+			local highestY = -99999
+			for _, block in ipairs(tycoon.Blocks:GetChildren()) do
+				if block:IsA("BasePart") then
+					if block.Position.Y > highestY then
+						highestY = block.Position.Y
+						targetPos = block.Position
+					end
+				end
+			end
+		end
+		
+		-- Fallback: Si no tiene torre, usar al jugador
+		if not targetPos and victim.Character and victim.Character:FindFirstChild("HumanoidRootPart") then
+			targetPos = victim.Character.HumanoidRootPart.Position
+		end
+		
+		if targetPos then
+			-- Spawn Yunque
+			local anvil = Instance.new("Part")
+			anvil.Name = "JUSTICE_ANVIL"
+			anvil.Size = Vector3.new(12, 10, 12)
+			anvil.Position = targetPos + Vector3.new(0, 100, 0) -- 100 studs arriba
+			anvil.Color = Color3.new(0.2, 0.2, 0.2)
+			anvil.Material = Enum.Material.Metal
+			anvil.Shape = Enum.PartType.Block
+			anvil.Anchored = false
+			-- FÍSICA PURA Y DURA
+			anvil.CustomPhysicalProperties = PhysicalProperties.new(100, 0.3, 0.5) -- Densidad 100
+			anvil.Parent = Workspace
+			
+			-- Sonido de caída (opcional)
+			local s = Instance.new("Sound", anvil)
+			s.SoundId = "rbxassetid://138210320" -- Sonido metal
+			s:Play()
+			
+			-- Mensaje Global
+			local msg = Instance.new("Message", Workspace)
+			msg.Text = "EL PUEBLO HA HABLADO: YUNQUE PARA " .. string.upper(victim.Name)
+			Debris:AddItem(msg, 5)
+			Debris:AddItem(anvil, 20) -- Limpiar yunque después de 20s
+		end
+	end
+	startEventRemote:FireAllClients("Reset", 0)
+end
+
+-- Listener de Votos
+submitVoteRemote.OnServerEvent:Connect(function(player, targetUserId)
+	if isVotingActive and currentVotes[targetUserId] then
+		currentVotes[targetUserId] += 1
+	end
+end)
+
+-- === BUCLE PRINCIPAL ===
+task.spawn(function()
+	while true do
+		local waitTime = math.random(EVENT_INTERVAL_MIN, EVENT_INTERVAL_MAX)
+		print("Próximo evento en: " .. waitTime .. " segundos.")
+		task.wait(waitTime)
+		
+		local eventRoll = math.random(1, 3)
+		
+		if eventRoll == 1 then
+			Event_GravityGlitch()
+		elseif eventRoll == 2 then
+			Event_SpeedRun()
+		elseif eventRoll == 3 then
+			Event_DemocracyOfHate()
+		end
+	end
+end)
