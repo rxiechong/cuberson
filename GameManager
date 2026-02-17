@@ -24,6 +24,10 @@ local towersFolder = workspace:FindFirstChild("Towers") or Instance.new("Folder"
 towersFolder.Name = "Towers"
 local globalCubes = workspace:FindFirstChild("GlobalCubes") or Instance.new("Folder", workspace)
 globalCubes.Name = "GlobalCubes"
+-- [[ AGREGAR ESTO EN TUS VARIABLES GLOBALES ]]
+local Teams = game:GetService("Teams") 
+local altarsFolder = workspace:FindFirstChild("Altars") or Instance.new("Folder", workspace)
+altarsFolder.Name = "Altars"
 
 -- MERCADO DE VALORES
 local MarketMultipliers = {}
@@ -229,7 +233,58 @@ end
 -- ==========================================================
 -- 3. LÓGICA DE INVENTARIO Y RECOGIDA
 -- ==========================================================
+-- [[ PEGAR EN SECCIÓN DE FUNCIONES ]]
 
+function SetupTeamsAndAltars()
+	-- Crear Teams en Roblox si no existen
+	if not Teams:FindFirstChild("Azul") then
+		local t = Instance.new("Team", Teams); t.Name = "Azul"; t.TeamColor = BrickColor.new("Bright blue"); t.AutoAssignable = false
+	end
+	if not Teams:FindFirstChild("Rojo") then
+		local t = Instance.new("Team", Teams); t.Name = "Rojo"; t.TeamColor = BrickColor.new("Bright red"); t.AutoAssignable = false
+	end
+
+	-- Generar Altares Físicos
+	if SETTINGS.TEAMS then
+		for teamKey, info in pairs(SETTINGS.TEAMS) do
+			local altarName = "Altar_" .. teamKey
+			if not altarsFolder:FindFirstChild(altarName) then
+				local altar = Instance.new("Model", altarsFolder); altar.Name = altarName
+
+				-- Base
+				local base = Instance.new("Part", altar); base.Name = "Base"; base.Anchored = true
+				base.Size = Vector3.new(SETTINGS.ALTAR_RADIUS * 2, 1, SETTINGS.ALTAR_RADIUS * 2)
+				base.Position = info.AltarPos; base.Color = info.Color; base.Material = Enum.Material.Neon; base.Shape = Enum.PartType.Cylinder
+				base.CFrame = CFrame.new(info.AltarPos) * CFrame.Angles(0,0,math.rad(90)) 
+
+				-- Zona Visual
+				local zone = Instance.new("Part", altar); zone.Name = "ZoneDisplay"; zone.Anchored = true; zone.CanCollide = false
+				zone.Size = Vector3.new(SETTINGS.ALTAR_RADIUS * 2, 50, SETTINGS.ALTAR_RADIUS * 2)
+				zone.Position = info.AltarPos + Vector3.new(0, 25, 0); zone.Shape = Enum.PartType.Cylinder
+				zone.CFrame = CFrame.new(zone.Position) * CFrame.Angles(0,0,math.rad(90))
+				zone.Color = info.Color; zone.Transparency = 0.8; zone.Material = Enum.Material.ForceField
+
+				-- Carpeta interna
+				local blocks = Instance.new("Folder", altar); blocks.Name = "Blocks"
+
+				-- Cartel Flotante
+				local bb = Instance.new("Part", altar); bb.Size=Vector3.new(1,1,1); bb.Anchored=true; bb.Transparency=1; bb.Position=info.AltarPos+Vector3.new(0,20,0)
+				local bg = Instance.new("BillboardGui", bb); bg.Size=UDim2.new(0,200,0,100); bg.AlwaysOnTop=true
+				local tl = Instance.new("TextLabel", bg); tl.Size=UDim2.new(1,0,1,0); tl.Text="FONDO COMÚN\n"..info.Name; tl.TextColor3=info.Color; tl.BackgroundTransparency=1; tl.TextScaled=true; tl.Font=Enum.Font.FredokaOne
+			end
+		end
+	end
+end
+
+function AssignTeam(player)
+	local blues = #Teams.Azul:GetPlayers()
+	local reds = #Teams.Rojo:GetPlayers()
+	if blues <= reds then
+		player.Team = Teams.Azul; player.TeamColor = BrickColor.new("Bright blue")
+	else
+		player.Team = Teams.Rojo; player.TeamColor = BrickColor.new("Bright red")
+	end
+end
 function PickupCube(player, cube, val)
 	-- A. Si manos vacías -> Equipar
 	if not player:GetAttribute("Carrying") then
@@ -377,21 +432,60 @@ function SpawnCube(customData)
 
 	local timerLabel = makeTxt(Enum.NormalId.Right, SETTINGS.CUBE_LIFETIME.."s", Color3.new(1,1,0))
 
+	-- [[ REEMPLAZAR TU BUCLE DE ECONOMÍA POR ESTE ]]
 	task.spawn(function()
-		task.wait(0.2)
-		for i = SETTINGS.CUBE_LIFETIME, 0, -1 do
-			if not cube or not cube.Parent or (cube:GetAttribute("Owner") or 0) ~= 0 then 
-				if timerLabel and timerLabel.Parent then 
-					local ownerId = cube:GetAttribute("Owner")
-					local n = "ADQUIRIDO"
-					local p = Players:GetPlayerByUserId(ownerId); if p then n = p.Name end
-					timerLabel.Text = n; timerLabel.TextColor3 = Color3.new(0,1,0)
+		while true do
+			task.wait(SETTINGS.PAY_INTERVAL)
+
+			-- 1. CALCULAR BOTE DE EQUIPOS (NUEVO)
+			local teamIncome = {Azul = 0, Rojo = 0}
+			for _, altar in ipairs(altarsFolder:GetChildren()) do
+				local tn = string.match(altar.Name, "Altar_(.+)") -- "BLUE" o "RED"
+				local key = (tn == "BLUE") and "Azul" or "Rojo"
+				local blks = altar:FindFirstChild("Blocks")
+				if blks then
+					for _, b in ipairs(blks:GetChildren()) do
+						-- Sumar valor * Multiplicador de Mercado
+						teamIncome[key] += ((b:GetAttribute("Value") or 0) * (MarketMultipliers[b.Name] or 1.0))
+					end
 				end
-				return 
 			end
-			timerLabel.Text = i .. "s"; task.wait(1)
+
+			-- 2. PAGAR A JUGADORES
+			for _, p in ipairs(Players:GetPlayers()) do
+				local total = 0
+				local t = towersFolder:FindFirstChild("Tycoon_"..p.UserId)
+
+				-- A. Ingreso Personal (Torre)
+				if t then
+					local inc, maxH = 0, 0; local org = t.GridParts.Origin.Position
+					for _, b in ipairs(t.Blocks:GetChildren()) do
+						if (Vector2.new(b.Position.X, b.Position.Z) - Vector2.new(org.X, org.Z)).Magnitude < 240 then
+							inc += ((b:GetAttribute("Value") or 0) * (MarketMultipliers[b.Name] or 1.0)); local h = b.Position.Y - org.Y; if h > maxH then maxH = h end
+						else b.Parent = globalCubes; b.Anchored = false end
+					end
+					local mult = 1 + (math.floor(maxH/4)*0.5); total += (inc * mult)
+					p:SetAttribute("MaxH", maxH)
+
+					-- Mostrar ganancia de equipo en el cartel
+					if t:FindFirstChild("Board") then 
+						t.Board.SurfaceGui.TextLabel.Text = string.format("%s\n$%.0f/s\n(Equipo: +$%.0f)", p.Name, inc*mult, (p.Team and teamIncome[p.Team.Name]/4 or 0)) 
+					end
+				end
+
+				-- B. Ingreso de Equipo (Repartir entre miembros)
+				if p.Team then
+					local members = #p.Team:GetPlayers()
+					if members > 0 then total += (teamIncome[p.Team.Name] / members) end
+				end
+
+				p.leaderstats.Cash.Value = math.max(0, p.leaderstats.Cash.Value + total)
+				p:SetAttribute("Time", (p:GetAttribute("Time") or 0) + 1)
+			end
+
+			-- ACTUALIZAR LEADERBOARDS (Si tienes la funcion UpdateLBs, dejala aqui)
+			if UpdateLBs then UpdateLBs() end
 		end
-		if cube and cube.Parent and (cube:GetAttribute("Owner") or 0) == 0 then cube:Destroy() end
 	end)
 
 	local prompt = Instance.new("ProximityPrompt", cube); prompt.HoldDuration = 0.1
@@ -443,7 +537,27 @@ placeEvent.OnServerEvent:Connect(function(player, hitPos)
 	local weld = carriedCube:FindFirstChild("CarryingWeld"); if weld then weld:Destroy() end
 	player:SetAttribute("Carrying", false)
 	carriedCube.CanCollide = true; carriedCube.Anchored = false; carriedCube.AssemblyLinearVelocity = Vector3.new(0,0,0) 
+	-- [[ INSERTAR ESTO EN placeEvent, JUSTO DESPUÉS DE SOLTAR EL CUBO ]]
 
+	-- DETECTAR ALTAR DE EQUIPO
+	local targetAltar = nil
+	for _, altar in ipairs(altarsFolder:GetChildren()) do
+		local base = altar:FindFirstChild("Base")
+		if base and (Vector2.new(hitPos.X, hitPos.Z) - Vector2.new(base.Position.X, base.Position.Z)).Magnitude < SETTINGS.ALTAR_RADIUS then targetAltar = altar; break end
+	end
+
+	if targetAltar then
+		carriedCube.Position = Vector3.new(hitPos.X, hitPos.Y+2, hitPos.Z); carriedCube.Anchored = false; carriedCube.Parent = targetAltar.Blocks
+
+		-- Marcar propiedad de equipo
+		local tName = string.match(targetAltar.Name, "Altar_(.+)")
+		local finalTeam = (tName == "BLUE") and "Azul" or "Rojo"
+		carriedCube:SetAttribute("TeamOwner", finalTeam)
+
+		-- Si soy enemigo, activo prompt de robo
+		if player.Team.Name ~= finalTeam then CreateStealPrompt(carriedCube) end
+		return -- IMPORTANTE: Salir aquí para que no intente ponerlo en una torre
+	end
 	local targetPlot = nil
 	for _, plotModel in ipairs(towersFolder:GetChildren()) do
 		local originPart = plotModel:FindFirstChild("GridParts") and plotModel.GridParts:FindFirstChild("Origin")
@@ -662,6 +776,7 @@ end)
 -- ==========================================================
 -- 8. INICIALIZACIÓN Y PLAYER LIFECYCLE
 -- ==========================================================
+SetupTeamsAndAltars()
 SetupPlots()
 
 Players.PlayerAdded:Connect(function(p)
@@ -671,6 +786,7 @@ Players.PlayerAdded:Connect(function(p)
 	p:SetAttribute("MaxSlots", SETTINGS.BASE_SLOTS); p:SetAttribute("Carrying", false); p:SetAttribute("Time", 0); p:SetAttribute("MaxH", 0)
 
 	LoadPlayerData(p) -- CARGAR DATOS
+	AssignTeam(p)
 
 	p.CharacterAdded:Connect(function(char)
 		task.wait(0.5); local hum = char:WaitForChild("Humanoid"); local hrp = char:WaitForChild("HumanoidRootPart")
