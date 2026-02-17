@@ -46,7 +46,10 @@ Config.CUBES = {
 		{Name = "Oro Maldito", Value = -500, Price = 75000, Rarity = "TRAMPA", Color = Color3.fromRGB(200,50,0), Mat = Enum.Material.Foil},
 		{Name = "Antimateria", Value = -2500, Price = 500000, Rarity = "PELIGRO", Color = Color3.fromRGB(0,0,0), Mat = Enum.Material.Neon},
 		{Name = "Jabón", Value = 0, Price = 8000, Rarity = "TRAMPA", Color = Color3.fromRGB(255,200,200), Mat = Enum.Material.Plastic}
-	}
+	-- [[ ESPECIALES v31 ]]
+	{Name = "Glitch", Value = 0, Price = 0, Rarity = "VOLÁTIL", Color = Color3.fromRGB(0, 255, 100), Mat = Enum.Material.Glass},
+	{Name = "Permablock", Value = 200, Price = 50000, Rarity = "ETERNO", Color = Color3.fromRGB(255, 255, 255), Mat = Enum.Material.Neon}	
+}
 
 
 return Config
