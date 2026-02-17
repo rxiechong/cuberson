@@ -48,23 +48,46 @@ end
 
 function CreateStealPrompt(cube)
 	if cube:FindFirstChild("StealPrompt") then return end
+
 	local price = cube:GetAttribute("Price") or 100
+	local originalOwnerId = cube:GetAttribute("Owner") -- ¿De quién es el cubo?
+
 	local p = Instance.new("ProximityPrompt", cube)
 	p.Name = "StealPrompt"
-	p.ActionText = "ROBAR ($".. (price*3) ..")"
-	p.HoldDuration = 2
+	-- El texto inicial dice ROBAR, pero la lógica de abajo decide si cobramos o no
+	p.ActionText = "ROBAR/RECUPERAR" 
+	p.HoldDuration = 1
 
-	p.Triggered:Connect(function(thief)
+	p.Triggered:Connect(function(interactor)
 		local cost = price * 3
-		if thief.leaderstats.Cash.Value >= cost then
-			thief.leaderstats.Cash.Value -= cost
+		local isMyCube = (interactor.UserId == originalOwnerId)
+
+		-- Si es MI cubo, es GRATIS. Si es de otro, pago el triple.
+		if isMyCube then
+			cost = 0 -- ¡Es mío! Me lo llevo.
+		end
+
+		if interactor.leaderstats.Cash.Value >= cost then
+			interactor.leaderstats.Cash.Value -= cost
 			p:Destroy() 
+
+			-- Romper welds (la torre cae)
 			for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
 			cube.Anchored = false
-			PickupCube(thief, cube, cube:GetAttribute("Value"))
+
+			-- Mensaje de feedback (Opcional, sale en la consola F9)
+			if isMyCube then
+				print(interactor.Name .. " recuperó su cubo prestado.")
+			else
+				print(interactor.Name .. " robó un cubo por $"..cost)
+			end
+
+			-- Importante: Mantenemos el Owner original para que siga diciendo tu nombre
+			PickupCube(interactor, cube, cube:GetAttribute("Value"))
 		end
 	end)
 end
+
 
 function SpawnCube(customData)
 	if #globalCubes:GetChildren() >= 80 then return end
@@ -107,8 +130,18 @@ function SpawnCube(customData)
 	task.spawn(function()
 		task.wait(0.2)
 		for i = SETTINGS.CUBE_LIFETIME, 0, -1 do
+			-- Si el cubo tiene dueño (Owner != 0)
 			if not cube or not cube.Parent or (cube:GetAttribute("Owner") or 0) ~= 0 then 
-				if timerLabel and timerLabel.Parent then timerLabel.Text = "ADQUIRIDO"; timerLabel.TextColor3 = Color3.new(0,1,0) end
+				if timerLabel and timerLabel.Parent then 
+					-- [[ CAMBIO: MOSTRAR NOMBRE DEL DUEÑO ]]
+					local ownerId = cube:GetAttribute("Owner")
+					local ownerName = "DESCONOCIDO"
+					local p = Players:GetPlayerByUserId(ownerId)
+					if p then ownerName = p.Name end
+
+					timerLabel.Text = ownerName -- Dice el nombre
+					timerLabel.TextColor3 = Color3.new(0,1,0) -- Color verde
+				end
 				return 
 			end
 			timerLabel.Text = i .. "s"; task.wait(1)
