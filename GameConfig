@@ -12,6 +12,13 @@ Config.SETTINGS = {
 	TACKLE_SPEED_THRESHOLD = 20,
 	CELESTIAL_INTERVAL = 300, -- 5 minutos
 	CHAOS_INTERVAL = 300      -- 5 minutos
+	-- [[ MONETIZACIÓN Y EXTRAS ]]
+	SCAFFOLD_COST = 1000000000, -- 1 Billón (Precio del Andamio)
+	MAX_PERMABLOCKS = 20,        -- Límite de bloques eternos por torre
+
+	-- [[ IDs DE ROBLOX ]] (Cámbialos por los tuyos reales)
+	DEV_PRODUCT_PERMABLOCK_ID = 12345678, 
+	GAMEPASS_JETPACK_ID = 12345678,
 }
 
 -- === TU LISTA DE CUBOS (DATA) ===
