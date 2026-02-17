@@ -1,4 +1,4 @@
--- [[ INVENTORY HUD v1.0 ]]
+-- [[ INVENTORY HUD v2.0 - CON BOTÓN ABRIR/CERRAR ]]
 -- UBICACIÓN: StarterGui -> LocalScript (Llamar "InventoryHUD")
 
 local Players = game:GetService("Players")
@@ -17,13 +17,25 @@ local sg = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
 sg.Name = "ViralHUD"
 sg.ResetOnSpawn = false 
 
--- FRAME PRINCIPAL (MOCHILA)
+-- BOTÓN DE APERTURA (TOGGLE)
+local toggleBtn = Instance.new("TextButton", sg)
+toggleBtn.Name = "ToggleBackpack"
+toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+toggleBtn.Position = UDim2.new(0, 10, 0.5, -20) -- Centro Izquierda (Pequeño)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+toggleBtn.Text = "🎒"
+toggleBtn.TextSize = 30
+local tCorner = Instance.new("UICorner", toggleBtn); tCorner.CornerRadius = UDim.new(0, 8)
+
+-- FRAME PRINCIPAL (MOCHILA) - OCULTO POR DEFECTO
 local mainFrame = Instance.new("Frame", sg)
 mainFrame.Name = "BackpackFrame"
 mainFrame.Size = UDim2.new(0, 220, 0, 320)
-mainFrame.Position = UDim2.new(0, 10, 0.5, -160) -- Centro Izquierda
+-- Posición: Justo a la derecha del botón toggle
+mainFrame.Position = UDim2.new(0, 70, 0.5, -160) 
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 mainFrame.BorderSizePixel = 0
+mainFrame.Visible = false -- ¡AHORA EMPIEZA CERRADO!
 local corner = Instance.new("UICorner", mainFrame); corner.CornerRadius = UDim.new(0, 8)
 
 -- TÍTULO
@@ -34,6 +46,16 @@ title.Text = "MOCHILA"
 title.Font = Enum.Font.FredokaOne
 title.TextSize = 24
 title.TextColor3 = Color3.new(1,1,1)
+
+-- Botón CERRAR (X) dentro del frame
+local closeBtn = Instance.new("TextButton", mainFrame)
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.new(1, 0, 0)
+closeBtn.Font = Enum.Font.FredokaOne
+closeBtn.TextSize = 20
 
 -- LISTA DE ITEMS (SCROLL)
 local itemsFrame = Instance.new("ScrollingFrame", mainFrame)
@@ -53,7 +75,7 @@ upBtn.TextSize = 16
 upBtn.TextColor3 = Color3.new(1,1,1)
 local btnCorner = Instance.new("UICorner", upBtn); btnCorner.CornerRadius = UDim.new(0, 6)
 
--- NEWS TICKER (NOTICIAS DE MERCADO)
+-- NEWS TICKER (NOTICIAS DE MERCADO - ARRIBA)
 local newsBg = Instance.new("Frame", sg)
 newsBg.Size = UDim2.new(0, 300, 0, 30)
 newsBg.Position = UDim2.new(0.5, -150, 0, 10) -- Arriba Centro
@@ -71,7 +93,23 @@ newsLabel.TextSize = 16
 
 -- === 2. LÓGICA VISUAL ===
 
+-- Función Toggle (Abrir/Cerrar)
+local function ToggleInventory()
+	mainFrame.Visible = not mainFrame.Visible
+	if mainFrame.Visible then
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100) -- Oscuro si está abierto
+	else
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) -- Azul si está cerrado
+	end
+end
+
+toggleBtn.MouseButton1Click:Connect(ToggleInventory)
+closeBtn.MouseButton1Click:Connect(ToggleInventory)
+
 local function updateInventory()
+	-- Solo actualizamos si está visible para ahorrar recursos
+	if not mainFrame.Visible then return end
+
 	-- 1. Limpiar lista visual anterior
 	for _, c in ipairs(itemsFrame:GetChildren()) do
 		if c:IsA("TextButton") then c:Destroy() end
@@ -91,7 +129,7 @@ local function updateInventory()
 			local itemBtn = Instance.new("TextButton", itemsFrame)
 			itemBtn.Size = UDim2.new(1, 0, 0, 30)
 			itemBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-			itemBtn.Text = "  " .. item.Name -- Ej: "  Titanio"
+			itemBtn.Text = "  " .. item.Name
 			itemBtn.TextColor3 = Color3.new(1,1,1)
 			itemBtn.Font = Enum.Font.SourceSansBold
 			itemBtn.TextSize = 14
@@ -125,7 +163,7 @@ end
 
 -- === 3. CONEXIONES ===
 
--- Actualizar inventario constantemente (por si recoges algo rápido)
+-- Actualizar inventario constantemente
 RunService.RenderStepped:Connect(function()
 	if player:FindFirstChild("Inventory") then
 		updateInventory()
@@ -134,7 +172,6 @@ end)
 
 -- Botón de Mejorar
 upBtn.MouseButton1Click:Connect(function()
-	-- Invocar al servidor para comprar espacio
 	local success, msg = upgradeFunc:InvokeServer()
 	print(msg) 
 end)
@@ -142,12 +179,12 @@ end)
 -- Escuchar noticias del mercado
 MarketNews.Changed:Connect(function(newVal)
 	newsLabel.Text = newVal
-	
-	-- Efectos de color según la noticia
-	if string.find(newVal, "BOOM") then
-		newsLabel.TextColor3 = Color3.fromRGB(0, 255, 100) -- Verde Matrix
-	elseif string.find(newVal, "CRASH") then
-		newsLabel.TextColor3 = Color3.fromRGB(255, 50, 50) -- Rojo Pánico
+	if string.find(newVal, "STONKS") then -- Detectar tu palabra clave
+		if string.find(newVal, "⬆️") then
+			newsLabel.TextColor3 = Color3.fromRGB(0, 255, 100) -- Verde
+		else
+			newsLabel.TextColor3 = Color3.fromRGB(255, 50, 50) -- Rojo
+		end
 	else
 		newsLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
 	end
