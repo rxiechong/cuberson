@@ -1,0 +1,23 @@
+-- [[ SCRIPT DE CLIENTE - v25.0 ]]
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local placeEvent = game:GetService("ReplicatedStorage"):WaitForChild("ViralRemotes"):WaitForChild("PlaceCube")
+
+local sg = Instance.new("ScreenGui", player.PlayerGui)
+local f = Instance.new("Frame", sg); f.Size = UDim2.new(0,350,0,100); f.Position = UDim2.new(0.5,-175, 0.85, 0); f.BackgroundColor3 = Color3.new(0,0,0); f.BackgroundTransparency = 0.5
+local corner = Instance.new("UICorner", f)
+local t = Instance.new("TextLabel", f); t.Size = UDim2.new(1,0,1,0); t.TextScaled = true; t.TextColor3 = Color3.new(1,1,1); t.BackgroundTransparency = 1; t.Text = "VIRAL TYCOON V25"
+
+mouse.Button1Down:Connect(function() 
+	placeEvent:FireServer(mouse.Hit.Position) 
+end)
+
+game:GetService("RunService").RenderStepped:Connect(function()
+	local isCarrying = player:GetAttribute("Carrying")
+	if isCarrying then 
+		t.Text = "CUBO PROTEGIDO\nCLIC PARA APILAR" t.TextColor3 = Color3.new(0,255,100)
+	else 
+		t.Text = "TIMER FIX: ACTIVO\nLOS CUBOS YA NO DESAPARECEN" t.TextColor3 = Color3.new(255,255,255) 
+	end
+end)
