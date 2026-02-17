@@ -11,14 +11,19 @@ Config.SETTINGS = {
 	MAX_EXPANSIONS = 6,
 	TACKLE_SPEED_THRESHOLD = 20,
 	CELESTIAL_INTERVAL = 300, -- 5 minutos
-	CHAOS_INTERVAL = 300      -- 5 minutos
+	CHAOS_INTERVAL = 300,      -- 5 minutos
 	-- [[ MONETIZACIÓN Y EXTRAS ]]
 	SCAFFOLD_COST = 1000000000, -- 1 Billón (Precio del Andamio)
 	MAX_PERMABLOCKS = 20,        -- Límite de bloques eternos por torre
+	-- [[ SISTEMA DE MOCHILA (V37) ]]
+	BASE_SLOTS = 4,
+	CASH_SLOT_LIMIT = 16, -- Hasta aquí se paga con dinero del juego
+	MAX_TOTAL_SLOTS = 32, -- Hasta aquí se paga con Robux
 
-	-- [[ IDs DE ROBLOX ]] (Cámbialos por los tuyos reales)
+	-- [[ IDs DE ROBLOX ]]
 	DEV_PRODUCT_PERMABLOCK_ID = 12345678, 
-	GAMEPASS_JETPACK_ID = 12345678,
+	DEV_PRODUCT_SLOTS_ID = 11111111, -- ¡PON TU ID REAL AQUÍ!
+	GAMEPASS_JETPACK_ID = 12345678
 }
 
 -- === TU LISTA DE CUBOS (DATA) ===
