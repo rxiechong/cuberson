@@ -1,4 +1,4 @@
--- [[ INVENTORY HUD v2.0 - CON BOTÓN ABRIR/CERRAR ]]
+-- [[ INVENTORY HUD v3.0 - CON TIMERS Y TOGGLE ]]
 -- UBICACIÓN: StarterGui -> LocalScript (Llamar "InventoryHUD")
 
 local Players = game:GetService("Players")
@@ -21,21 +21,20 @@ sg.ResetOnSpawn = false
 local toggleBtn = Instance.new("TextButton", sg)
 toggleBtn.Name = "ToggleBackpack"
 toggleBtn.Size = UDim2.new(0, 50, 0, 50)
-toggleBtn.Position = UDim2.new(0, 10, 0.5, -20) -- Centro Izquierda (Pequeño)
+toggleBtn.Position = UDim2.new(0, 10, 0.5, -20)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
 toggleBtn.Text = "🎒"
 toggleBtn.TextSize = 30
 local tCorner = Instance.new("UICorner", toggleBtn); tCorner.CornerRadius = UDim.new(0, 8)
 
--- FRAME PRINCIPAL (MOCHILA) - OCULTO POR DEFECTO
+-- FRAME PRINCIPAL (MOCHILA)
 local mainFrame = Instance.new("Frame", sg)
 mainFrame.Name = "BackpackFrame"
 mainFrame.Size = UDim2.new(0, 220, 0, 320)
--- Posición: Justo a la derecha del botón toggle
 mainFrame.Position = UDim2.new(0, 70, 0.5, -160) 
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 mainFrame.BorderSizePixel = 0
-mainFrame.Visible = false -- ¡AHORA EMPIEZA CERRADO!
+mainFrame.Visible = false
 local corner = Instance.new("UICorner", mainFrame); corner.CornerRadius = UDim.new(0, 8)
 
 -- TÍTULO
@@ -47,7 +46,6 @@ title.Font = Enum.Font.FredokaOne
 title.TextSize = 24
 title.TextColor3 = Color3.new(1,1,1)
 
--- Botón CERRAR (X) dentro del frame
 local closeBtn = Instance.new("TextButton", mainFrame)
 closeBtn.Size = UDim2.new(0, 30, 0, 30)
 closeBtn.Position = UDim2.new(1, -35, 0, 5)
@@ -57,7 +55,6 @@ closeBtn.TextColor3 = Color3.new(1, 0, 0)
 closeBtn.Font = Enum.Font.FredokaOne
 closeBtn.TextSize = 20
 
--- LISTA DE ITEMS (SCROLL)
 local itemsFrame = Instance.new("ScrollingFrame", mainFrame)
 itemsFrame.Size = UDim2.new(1, -20, 1, -100)
 itemsFrame.Position = UDim2.new(0, 10, 0, 40)
@@ -65,7 +62,6 @@ itemsFrame.BackgroundTransparency = 1
 itemsFrame.ScrollBarThickness = 4
 local layout = Instance.new("UIListLayout", itemsFrame); layout.Padding = UDim.new(0, 5)
 
--- BOTÓN DE MEJORA
 local upBtn = Instance.new("TextButton", mainFrame)
 upBtn.Size = UDim2.new(1, -20, 0, 45)
 upBtn.Position = UDim2.new(0, 10, 1, -55)
@@ -75,10 +71,10 @@ upBtn.TextSize = 16
 upBtn.TextColor3 = Color3.new(1,1,1)
 local btnCorner = Instance.new("UICorner", upBtn); btnCorner.CornerRadius = UDim.new(0, 6)
 
--- NEWS TICKER (NOTICIAS DE MERCADO - ARRIBA)
+-- NEWS TICKER (ARRIBA CENTRO)
 local newsBg = Instance.new("Frame", sg)
 newsBg.Size = UDim2.new(0, 300, 0, 30)
-newsBg.Position = UDim2.new(0.5, -150, 0, 10) -- Arriba Centro
+newsBg.Position = UDim2.new(0.5, -150, 0, 10)
 newsBg.BackgroundColor3 = Color3.new(0,0,0)
 newsBg.BackgroundTransparency = 0.5
 local newsCorner = Instance.new("UICorner", newsBg); newsCorner.CornerRadius = UDim.new(1,0)
@@ -91,40 +87,59 @@ newsLabel.TextColor3 = Color3.new(1,1,0)
 newsLabel.Font = Enum.Font.Code
 newsLabel.TextSize = 16
 
+-- [[ NUEVO: PANEL DE TIMERS (ARRIBA DERECHA DEL TICKER) ]]
+local timerFrame = Instance.new("Frame", sg)
+timerFrame.Size = UDim2.new(0, 120, 0, 60)
+timerFrame.Position = UDim2.new(0.5, 160, 0, 10) -- A la derecha de las noticias
+timerFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+timerFrame.BackgroundTransparency = 0.3
+local tCorner = Instance.new("UICorner", timerFrame); tCorner.CornerRadius = UDim.new(0, 6)
+
+local eventTimerLbl = Instance.new("TextLabel", timerFrame)
+eventTimerLbl.Size = UDim2.new(1, -10, 0, 25)
+eventTimerLbl.Position = UDim2.new(0, 5, 0, 5)
+eventTimerLbl.BackgroundTransparency = 1
+eventTimerLbl.TextXAlignment = Enum.TextXAlignment.Left
+eventTimerLbl.Font = Enum.Font.FredokaOne
+eventTimerLbl.TextColor3 = Color3.fromRGB(255, 100, 100)
+eventTimerLbl.TextSize = 14
+eventTimerLbl.Text = "EVENTO: --:--"
+
+local spinTimerLbl = Instance.new("TextLabel", timerFrame)
+spinTimerLbl.Size = UDim2.new(1, -10, 0, 25)
+spinTimerLbl.Position = UDim2.new(0, 5, 0, 30)
+spinTimerLbl.BackgroundTransparency = 1
+spinTimerLbl.TextXAlignment = Enum.TextXAlignment.Left
+spinTimerLbl.Font = Enum.Font.FredokaOne
+spinTimerLbl.TextColor3 = Color3.fromRGB(100, 255, 100)
+spinTimerLbl.TextSize = 14
+spinTimerLbl.Text = "RULETA: LISTA"
+
 -- === 2. LÓGICA VISUAL ===
 
--- Función Toggle (Abrir/Cerrar)
 local function ToggleInventory()
 	mainFrame.Visible = not mainFrame.Visible
 	if mainFrame.Visible then
-		toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100) -- Oscuro si está abierto
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
 	else
-		toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) -- Azul si está cerrado
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
 	end
 end
-
 toggleBtn.MouseButton1Click:Connect(ToggleInventory)
 closeBtn.MouseButton1Click:Connect(ToggleInventory)
 
 local function updateInventory()
-	-- Solo actualizamos si está visible para ahorrar recursos
 	if not mainFrame.Visible then return end
+	-- Limpiar lista anterior
+	for _, c in ipairs(itemsFrame:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
 
-	-- 1. Limpiar lista visual anterior
-	for _, c in ipairs(itemsFrame:GetChildren()) do
-		if c:IsA("TextButton") then c:Destroy() end
-	end
-	
-	-- 2. Leer inventario real del jugador
 	local inv = player:FindFirstChild("Inventory")
 	local maxSlots = player:GetAttribute("MaxSlots") or 4
 	local currentCount = 0
-	
+
 	if inv then
 		local items = inv:GetChildren()
 		currentCount = #items
-		
-		-- Crear un botón por cada item
 		for i, item in ipairs(items) do
 			local itemBtn = Instance.new("TextButton", itemsFrame)
 			itemBtn.Size = UDim2.new(1, 0, 0, 30)
@@ -135,60 +150,71 @@ local function updateInventory()
 			itemBtn.TextSize = 14
 			itemBtn.TextXAlignment = Enum.TextXAlignment.Left
 			local ic = Instance.new("UICorner", itemBtn); ic.CornerRadius = UDim.new(0,4)
-			
-			-- Al hacer clic en un item, pedir equiparlo
-			itemBtn.MouseButton1Click:Connect(function()
-				equipEvent:FireServer() 
-			end)
+			itemBtn.MouseButton1Click:Connect(function() equipEvent:FireServer() end)
 		end
 	end
-	
-	-- 3. Actualizar textos
+
 	title.Text = "MOCHILA (" .. currentCount .. "/" .. maxSlots .. ")"
-	
-	-- Lógica visual del botón de mejora (Híbrido)
+
 	if maxSlots < 16 then
 		local cost = 1000 * (maxSlots ^ 2)
-		upBtn.Text = "MEJORAR (+".. 4 ..")\n$" .. cost
-		upBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100) -- Verde Dinero
+		upBtn.Text = "MEJORAR (+".. 4 ..")\n$" .. cost; upBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
 	elseif maxSlots < 32 then
-		upBtn.Text = "EXPANDIR (ROBUX)\n💎"
-		upBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) -- Azul Robux
+		upBtn.Text = "EXPANDIR (ROBUX)\n💎"; upBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
 	else
-		upBtn.Text = "MÁXIMO ALCANZADO"
-		upBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-		upBtn.Active = false
+		upBtn.Text = "MÁXIMO ALCANZADO"; upBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80); upBtn.Active = false
 	end
 end
 
--- === 3. CONEXIONES ===
+-- FUNCIÓN HELPER: Formato MM:SS
+local function FormatTime(seconds)
+	if seconds <= 0 then return "00:00" end
+	local m = math.floor(seconds / 60)
+	local s = seconds % 60
+	return string.format("%02d:%02d", m, s)
+end
 
--- Actualizar inventario constantemente
+-- UPDATE DE TIMERS (Cada Frame)
 RunService.RenderStepped:Connect(function()
-	if player:FindFirstChild("Inventory") then
-		updateInventory()
+	-- 1. Actualizar Inventario si está abierto
+	if player:FindFirstChild("Inventory") then updateInventory() end
+
+	local now = os.time()
+
+	-- 2. Timer Evento (Global)
+	local nextEvent = ReplicatedStorage:GetAttribute("NextEventTime") or 0
+	local timeLeftEvent = math.max(0, nextEvent - now)
+	if timeLeftEvent > 0 then
+		eventTimerLbl.Text = "EVENTO: " .. FormatTime(timeLeftEvent)
+		eventTimerLbl.TextColor3 = Color3.fromRGB(255, 200, 100)
+	else
+		eventTimerLbl.Text = "EVENTO: ¡AHORA!"
+		eventTimerLbl.TextColor3 = Color3.fromRGB(255, 0, 0)
+		-- Efecto de parpadeo simple
+		if math.floor(tick()*2)%2 == 0 then eventTimerLbl.TextColor3 = Color3.new(1,1,1) end
+	end
+
+	-- 3. Timer Ruleta (Personal)
+	local nextSpin = player:GetAttribute("NextSpinTime") or 0
+	local timeLeftSpin = math.max(0, nextSpin - now)
+	if timeLeftSpin > 0 then
+		spinTimerLbl.Text = "RULETA: " .. FormatTime(timeLeftSpin)
+		spinTimerLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+	else
+		spinTimerLbl.Text = "RULETA: ¡LISTA!"
+		spinTimerLbl.TextColor3 = Color3.fromRGB(0, 255, 100)
 	end
 end)
 
--- Botón de Mejorar
-upBtn.MouseButton1Click:Connect(function()
-	local success, msg = upgradeFunc:InvokeServer()
-	print(msg) 
-end)
+-- Botón Mejorar
+upBtn.MouseButton1Click:Connect(function() local s,m=upgradeFunc:InvokeServer(); print(m) end)
 
--- Escuchar noticias del mercado
+-- Noticias Mercado
 MarketNews.Changed:Connect(function(newVal)
 	newsLabel.Text = newVal
-	if string.find(newVal, "STONKS") then -- Detectar tu palabra clave
-		if string.find(newVal, "⬆️") then
-			newsLabel.TextColor3 = Color3.fromRGB(0, 255, 100) -- Verde
-		else
-			newsLabel.TextColor3 = Color3.fromRGB(255, 50, 50) -- Rojo
-		end
-	else
-		newsLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
-	end
+	if string.find(newVal, "STONKS") then
+		if string.find(newVal, "⬆️") then newsLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+		else newsLabel.TextColor3 = Color3.fromRGB(255, 50, 50) end
+	else newsLabel.TextColor3 = Color3.fromRGB(255, 255, 100) end
 end)
-
--- Inicializar
 newsLabel.Text = MarketNews.Value
