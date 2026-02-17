@@ -42,12 +42,12 @@ spinFunc.OnServerInvoke = function(player)
 		return false, "¡Espera " .. (SPIN_COOLDOWN - (os.time() - lastSpin)) .. "s!"
 	end
 	cooldowns[player.UserId] = os.time()
-	
+	player:SetAttribute("NextSpinTime", os.time() + SPIN_COOLDOWN)
 	-- 2. Matemáticas de Probabilidad (Weighted Random)
 	local roll = math.random(1, 100)
 	local cumulative = 0
 	local prize = nil
-	
+
 	for _, entry in ipairs(LOOT_TABLE) do
 		cumulative += entry.Chance
 		if roll <= cumulative then
@@ -55,17 +55,17 @@ spinFunc.OnServerInvoke = function(player)
 			break
 		end
 	end
-	
+
 	if not prize then prize = LOOT_TABLE[1] end -- Fallback
-	
+
 	-- 3. Entregar Premio
 	-- (Se entrega ANTES de la animación visual para evitar lag, 
 	-- pero visualmente el cliente lo celebra después)
-	
+
 	if prize.Type == "Cash" then
 		player.leaderstats.Cash.Value += prize.Amount
 		print("Ruleta: " .. player.Name .. " ganó $" .. prize.Amount)
-		
+
 	elseif prize.Type == "Cube" then
 		local data = GetCubeData(prize.Name)
 		if data then
@@ -79,7 +79,7 @@ spinFunc.OnServerInvoke = function(player)
 			cube:SetAttribute("Value", data.Value)
 			cube:SetAttribute("Price", data.Price)
 			cube:SetAttribute("Owner", player.UserId)
-			
+
 			-- Lógica Especial Glitch
 			if prize.Name == "Glitch" then
 				task.spawn(function()
@@ -89,11 +89,11 @@ spinFunc.OnServerInvoke = function(player)
 					end
 				end)
 			end
-			
+
 			-- Intentar guardar en Inventario (Mochila)
 			local inv = player:FindFirstChild("Inventory")
 			local maxSlots = player:GetAttribute("MaxSlots") or 4
-			
+
 			if inv and #inv:GetChildren() < maxSlots then
 				-- A la mochila
 				cube.CanCollide = false
@@ -109,7 +109,7 @@ spinFunc.OnServerInvoke = function(player)
 			end
 		end
 	end
-	
+
 	-- 4. Retornar ángulo objetivo al cliente para la animación
 	return true, prize.Angle, prize.Name
 end
