@@ -798,21 +798,26 @@ task.spawn(function()
 		task.wait(SETTINGS.PAY_INTERVAL)
 
 		-- 1. CALCULAR INGRESOS DE EQUIPO (ALTARES)
+		-- Los altares se llaman "Altar_BLUE"/"Altar_RED" (Config.SETTINGS.TEAMS),
+		-- pero los equipos en Roblox son "Azul"/"Rojo". Aquí hacemos el mapeo.
 		local teamIncome = {Azul = 0, Rojo = 0}
 
 		for _, altar in ipairs(altarsFolder:GetChildren()) do
-			-- Detectar nombre del equipo desde el nombre del altar "Altar_Azul"
-			local teamName = string.gsub(altar.Name, "Altar_", "") -- "Azul" o "Rojo"
+			local altarKey = string.gsub(altar.Name, "Altar_", "") -- "BLUE" o "RED"
+			local teamName
+			if altarKey == "BLUE" then
+				teamName = "Azul"
+			elseif altarKey == "RED" then
+				teamName = "Rojo"
+			end
 
-			if altar:FindFirstChild("Blocks") then 
+			if teamName and altar:FindFirstChild("Blocks") then 
 				for _, b in ipairs(altar.Blocks:GetChildren()) do 
 					-- Verificar que sea un bloque válido y tenga valor
 					if b:IsA("BasePart") then
 						local val = b:GetAttribute("Value") or 0
 						local mult = MarketMultipliers[b.Name] or 1.0
-						if teamIncome[teamName] then
-							teamIncome[teamName] += (val * mult)
-						end
+						teamIncome[teamName] += (val * mult)
 					end
 				end 
 			end
