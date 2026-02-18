@@ -7,6 +7,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService = game:GetService("DataStoreService")
 local Debris = game:GetService("Debris")
 local ServerScriptService = game:GetService("ServerScriptService")
+local PhysicsService = game:GetService("PhysicsService")
 
 -- === IMPORTAR CONFIGURACIÓN ===
 local ConfigModule = ServerScriptService:WaitForChild("GameConfig")
@@ -28,6 +29,12 @@ globalCubes.Name = "GlobalCubes"
 local Teams = game:GetService("Teams") 
 local altarsFolder = workspace:FindFirstChild("Altars") or Instance.new("Folder", workspace)
 altarsFolder.Name = "Altars"
+
+pcall(function()
+	PhysicsService:RegisterCollisionGroup("Player")
+	PhysicsService:RegisterCollisionGroup("CarriedCube")
+	PhysicsService:CollisionGroupSetCollidable("Player", "CarriedCube", false)
+end)
 
 -- MERCADO DE VALORES
 local MarketMultipliers = {}
@@ -286,16 +293,18 @@ function AssignTeam(player)
 	end
 end
 -- [[ REEMPLAZO DE PickupCube (FIX VUELO) ]]
+-- [[ REEMPLAZAR FUNCIÓN PickupCube ]]
+-- [[ REEMPLAZO BLOQUE 1: PickupCube ]]
 function PickupCube(player, cube, val)
 	if not cube or not cube.Parent then return false end
 
-	-- A. Inventario
+	-- A. SI YA TIENE ALGO -> A LA MOCHILA
 	if player:GetAttribute("Carrying") then 
 		local inv = player:FindFirstChild("Inventory")
 		local maxSlots = player:GetAttribute("MaxSlots") or 4
 		if inv and #inv:GetChildren() < maxSlots then
-			cube.CanCollide=false; cube.Anchored=true; cube.Transparency=1; cube.CFrame=CFrame.new(0,-500,0)
-			cube.Parent=inv; cube:SetAttribute("Owner", player.UserId)
+			cube.CanCollide = false; cube.Anchored = true; cube.Transparency = 1; cube.CFrame = CFrame.new(0,-500,0)
+			cube.Parent = inv; cube:SetAttribute("Owner", player.UserId)
 			eventMessage:FireClient(player, "🎒 Guardado: "..cube.Name)
 			return true
 		else
@@ -304,34 +313,28 @@ function PickupCube(player, cube, val)
 		end
 	end
 
-	-- B. Mano (FIX FÍSICA)
+	-- B. MANOS VACÍAS -> EQUIPAR (FIX FÍSICA)
 	player:SetAttribute("Carrying", true); player:SetAttribute("CarryingValue", val)
 	cube.CanCollide = false
 	cube.Anchored = false
-	cube.Massless = true -- ESTO EVITA QUE EL PERSONAJE SE CAIGA O VUELE
-	cube.CollisionGroup = "CarriedCube" -- ESTO EVITA REBOTES
-
+	cube.Massless = true -- FIX VUELO: El cubo no pesa
+	cube.CollisionGroup = "CarriedCube" -- FIX REBOTE: No choca contigo
 	cube.Parent = player.Character
-	for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
 
-	local w = Instance.new("WeldConstraint", cube)
-	w.Name = "CarryingWeld"
-	w.Part0 = player.Character.HumanoidRootPart
-	w.Part1 = cube
-	w.Parent = cube
+	for _,w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
+	local w = Instance.new("WeldConstraint", cube); w.Name="CarryingWeld"
+	w.Part0 = player.Character.HumanoidRootPart; w.Part1 = cube; w.Parent = cube
+	cube.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -3.5) -- FIX BLUETOOTH
 
-	-- Posición correcta (Frente al pecho, no bluetooth)
-	cube.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -3.5)
-
-	-- Desactivar Prompt
 	local p = cube:FindFirstChild("ProximityPrompt"); if p then p.Enabled = false end
 
-	-- Limpieza si explota
+	-- FIX EXPLOSIÓN: Si el cubo muere, te libera
 	local con; con = cube.AncestryChanged:Connect(function(_, parent)
 		if not parent then player:SetAttribute("Carrying", false); if con then con:Disconnect() end end
 	end)
 	return true
 end
+
 
 -- Sacar item de mochila
 equipInvEvent.OnServerEvent:Connect(function(player)
@@ -398,35 +401,39 @@ function CreateStealPrompt(cube)
 	end)
 end
 
+-- [[ FUNCIÓN SpawnCube CORREGIDA ]]
+-- [[ FUNCIÓN SpawnCube CORREGIDA (FIX TIMERS "...") ]]
 function SpawnCube(customData)
-	if #globalCubes:GetChildren() >= 80 then return end
+	if #globalCubes:GetChildren() >= 100 then return end
 	local data = customData or CUBE_TYPES[math.random(1, #CUBE_TYPES)]
 
-	local cube = Instance.new("Part")
-	cube.Name = data.Name
-	cube.Size = Vector3.new(4,4,4)
-
+	local cube = Instance.new("Part"); cube.Name = data.Name; cube.Size = Vector3.new(4,4,4)
 	if data.Name == "Jabón" then 
-		cube.Shape = Enum.PartType.Ball 
+		cube.Shape = Enum.PartType.Ball
 		cube.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0, 0.5, 100, 1) 
 	end
 
 	cube.Position = Vector3.new(math.random(-60, 60), 120, math.random(-60, 60))
 	cube.Material, cube.Color = data.Mat, data.Color
-	cube:SetAttribute("Owner", 0); cube:SetAttribute("Value", data.Value); cube:SetAttribute("Price", data.Price)
-
+	cube:SetAttribute("Owner", 0)
+	cube:SetAttribute("Value", data.Value)
+	cube:SetAttribute("Price", data.Price)
 	if data.Name == "Permablock" then cube:SetAttribute("IsPerma", true) end
 
+	-- [[ FIX CRÍTICO: PARENTAR EL CUBO AQUÍ, ANTES DE LOS LOOPS ]]
+	cube.Parent = globalCubes 
+
+	-- MECÁNICA GLITCH
 	if data.Name == "Glitch" then
 		task.spawn(function()
 			while cube and cube.Parent do
-				local newVal = math.random(-100, 500)
-				cube:SetAttribute("Value", newVal)
+				cube:SetAttribute("Value", math.random(-100, 500))
 				task.wait(10)
 			end
 		end)
 	end
 
+	-- MECÁNICA ANTIMATERIA
 	if data.Name == "Antimateria" then
 		cube.Touched:Connect(function(hit)
 			if hit:IsA("BasePart") and hit ~= cube then
@@ -441,13 +448,14 @@ function SpawnCube(customData)
 	end
 
 	-- ETIQUETAS VISUALES
-	local function makeTxt(face, txt, color)
-		local sg = Instance.new("SurfaceGui", cube); sg.Face = face
-		local t = Instance.new("TextLabel", sg); t.Size = UDim2.new(1,0,1,0); t.Text = txt; t.TextScaled = true; t.TextColor3 = color; t.BackgroundTransparency = 1; t.Font = Enum.Font.FredokaOne
-		return t
+	local function makeTxt(f, txt, col) 
+		local sg=Instance.new("SurfaceGui",cube); sg.Face=f
+		local l=Instance.new("TextLabel",sg); l.Size=UDim2.new(1,0,1,0); l.Text=txt; l.TextScaled=true; l.TextColor3=col; l.BackgroundTransparency=1; l.Font=Enum.Font.FredokaOne
+		return l 
 	end
 	makeTxt(Enum.NormalId.Front, data.Rarity.."\n"..data.Name, Color3.new(1,1,1))
 
+	-- ETIQUETA VALOR (Loop)
 	local valLabel = makeTxt(Enum.NormalId.Top, "", Color3.new(0,1,0))
 	task.spawn(function()
 		while cube and cube.Parent do
@@ -458,97 +466,43 @@ function SpawnCube(customData)
 		end
 	end)
 
-	local timerLabel = makeTxt(Enum.NormalId.Right, SETTINGS.CUBE_LIFETIME.."s", Color3.new(1,1,0))
-
-	-- [[ REEMPLAZAR TU BUCLE DE ECONOMÍA POR ESTE ]]
-	-- [[ REEMPLAZO DEL BUCLE DE ECONOMÍA (FIX CRASH + FÍSICA) ]]
+	-- ETIQUETA TIMER / DUEÑO (SOLUCIÓN PUNTOS 2 y 15)
+	local infoLabel = makeTxt(Enum.NormalId.Right, "...", Color3.new(1,1,0))
 	task.spawn(function()
-		while true do
-			task.wait(SETTINGS.PAY_INTERVAL)
-
-			-- 1. Calcular Ingresos de Altares (Equipos)
-			local teamIncome = {Azul = 0, Rojo = 0}
-			for _, altar in ipairs(altarsFolder:GetChildren()) do
-				local tn = string.match(altar.Name, "Altar_(.+)")
-				local key = (tn == "BLUE") and "Azul" or "Rojo"
-				if altar:FindFirstChild("Blocks") then 
-					for _, b in ipairs(altar.Blocks:GetChildren()) do 
-						-- SAFETY CHECK: Verificar que sea una parte válida
-						if b and b:IsA("BasePart") then
-							teamIncome[key] += ((b:GetAttribute("Value") or 0) * (MarketMultipliers[b.Name] or 1.0)) 
-						end
-					end 
-				end
+		local timeLeft = SETTINGS.CUBE_LIFETIME
+		while cube and cube.Parent do
+			local ownerId = cube:GetAttribute("Owner") or 0
+			if ownerId ~= 0 then
+				-- TIENE DUEÑO: Mostrar Nombre
+				local p = Players:GetPlayerByUserId(ownerId)
+				infoLabel.Text = p and p.Name or "VENDIDO"
+				infoLabel.TextColor3 = Color3.new(0,1,0)
+			else
+				-- NO TIENE DUEÑO: Correr Timer
+				infoLabel.Text = timeLeft .. "s"
+				infoLabel.TextColor3 = Color3.new(1,1,0)
+				timeLeft = timeLeft - 1
+				if timeLeft <= 0 then cube:Destroy(); break end
 			end
-
-			-- 2. Pagar Jugadores
-			for _, p in ipairs(Players:GetPlayers()) do
-				local total = 0
-				local t = towersFolder:FindFirstChild("Tycoon_"..p.UserId)
-				local maxH = 0
-
-				if t then
-					local org = t.GridParts.Origin.Position
-					-- SAFETY CHECK CRÍTICO (Evita el error GameManager:789)
-					local blocks = t:FindFirstChild("Blocks")
-					if blocks then
-						for _, b in ipairs(blocks:GetChildren()) do
-							if b and b:IsA("BasePart") then -- Solo procesar Partes
-								if (Vector2.new(b.Position.X, b.Position.Z) - Vector2.new(org.X, org.Z)).Magnitude < 240 then
-									total += ((b:GetAttribute("Value") or 0) * (MarketMultipliers[b.Name] or 1.0))
-									local h = b.Position.Y - org.Y; if h > maxH then maxH = h end
-								else 
-									-- Si se cayó de la base, devolver al mundo
-									b.Parent = globalCubes; b.Anchored = false 
-								end
-							end
-						end
-					end
-
-					local mult = 1 + (math.floor(maxH/4)*0.5); total = total * mult
-
-					-- Actualizar Stats (Fix Altura)
-					if p:FindFirstChild("leaderstats") and p.leaderstats:FindFirstChild("Height") then
-						p.leaderstats.Height.Value = math.floor(maxH)
-					end
-
-					-- Actualizar Pizarra Base
-					if t:FindFirstChild("Board") then 
-						local teamShare = (p.Team and teamIncome[p.Team.Name] and teamIncome[p.Team.Name]/#p.Team:GetPlayers() or 0)
-						t.Board.SurfaceGui.TextLabel.Text = string.format("%s\n$%.0f/s\n(TEAM: +$%.0f)", p.Name, total, teamShare) 
-					end
-				end
-
-				-- Sumar parte del equipo
-				if p.Team and teamIncome[p.Team.Name] then
-					local members = #p.Team:GetPlayers()
-					if members > 0 then total += (teamIncome[p.Team.Name] / members) end
-				end
-
-				if p:FindFirstChild("leaderstats") then
-					p.leaderstats.Cash.Value = math.max(0, p.leaderstats.Cash.Value + total)
-				end
-				p:SetAttribute("Time", (p:GetAttribute("Time") or 0) + 1)
-			end
-
-			-- Actualizar Tablones (Si existe la función)
-			if UpdateLBs then UpdateLBs() end
+			task.wait(1)
 		end
 	end)
 
+	-- INTERACCIÓN DE COMPRA
 	local prompt = Instance.new("ProximityPrompt", cube); prompt.HoldDuration = 0.1
-	prompt.ActionText = data.Price > 0 and ("COMPRAR $"..data.Price) or "RECOGER"; cube.Parent = globalCubes
+	prompt.ActionText = data.Price > 0 and ("COMPRAR $"..data.Price) or "RECOGER"
 
-	prompt.Triggered:Connect(function(player)
+	prompt.Triggered:Connect(function(plr)
 		local owner = cube:GetAttribute("Owner") or 0
-		local cost = (owner == 0) and data.Price or (owner == player.UserId and 0 or (data.Price == 0 and 200 or data.Price * 6))
-		if owner == player.UserId then cost = 0 end 
+		local cost = (owner == plr.UserId) and 0 or (owner == 0 and data.Price or data.Price * 3)
 
-		if player.leaderstats.Cash.Value >= cost then
-			player.leaderstats.Cash.Value -= cost
-			cube:SetAttribute("Owner", player.UserId)
-			prompt.Enabled = false
-			PickupCube(player, cube, data.Value)
+		if plr.leaderstats.Cash.Value >= cost then
+			local success = PickupCube(plr, cube, data.Value)
+			if success then
+				if cost > 0 then plr.leaderstats.Cash.Value -= cost end
+				cube:SetAttribute("Owner", plr.UserId)
+				prompt.Enabled = false 
+			end
 		end
 	end)
 	return cube
@@ -560,32 +514,26 @@ end
 
 placeEvent.OnServerEvent:Connect(function(player, hitPos)
 	local char = player.Character; if not char then return end
-
-	-- 1. Intentar sacar de mano
 	local carriedCube = nil
-	for _, child in ipairs(char:GetChildren()) do 
-		if child:IsA("Part") and child:FindFirstChild("CarryingWeld") then carriedCube = child; break end 
-	end
+	for _, c in ipairs(char:GetChildren()) do if c:FindFirstChild("CarryingWeld") then carriedCube = c; break end end
 
-	-- 2. Si no hay en mano, sacar de mochila
-	if not carriedCube then
+	if not carriedCube then -- Sacar de mochila
 		local inv = player:FindFirstChild("Inventory")
 		if inv and #inv:GetChildren() > 0 then
 			local items = inv:GetChildren(); local cube = items[#items]
-			cube.Transparency = 0; cube.Anchored = false
-			player:SetAttribute("Carrying", true); player:SetAttribute("CarryingValue", cube:GetAttribute("Value"))
-			cube.Parent = player.Character
-			local w = Instance.new("WeldConstraint", cube); w.Name="CarryingWeld"; w.Part0=char.HumanoidRootPart; w.Part1=cube; cube.CFrame=char.HumanoidRootPart.CFrame*CFrame.new(0,0,5)
+			cube.Transparency=0; cube.Anchored=false
+			PickupCube(player, cube, cube:GetAttribute("Value"))
 			carriedCube = cube
-		else
-			return -- Nada en mano ni mochila
-		end
+		else return end
 	end
 
 	local weld = carriedCube:FindFirstChild("CarryingWeld"); if weld then weld:Destroy() end
 	player:SetAttribute("Carrying", false)
-	carriedCube.CanCollide = true; carriedCube.Anchored = false; carriedCube.AssemblyLinearVelocity = Vector3.new(0,0,0) 
-	-- [[ INSERTAR ESTO EN placeEvent, JUSTO DESPUÉS DE SOLTAR EL CUBO ]]
+	carriedCube.Massless = false; carriedCube.CanCollide = true; carriedCube.CollisionGroup = "Default"
+
+	-- FIX PROMPTS: Si es mío, poner Mover. Si no, Robar.
+	local p = carriedCube:FindFirstChild("ProximityPrompt")
+	if p then p.Enabled = true; p.ActionText = "MOVER" else CreateStealPrompt(carriedCube) end
 
 	-- DETECTAR ALTAR DE EQUIPO
 	local targetAltar = nil
@@ -607,51 +555,28 @@ placeEvent.OnServerEvent:Connect(function(player, hitPos)
 		return -- IMPORTANTE: Salir aquí para que no intente ponerlo en una torre
 	end
 	local targetPlot = nil
-	for _, plotModel in ipairs(towersFolder:GetChildren()) do
-		local originPart = plotModel:FindFirstChild("GridParts") and plotModel.GridParts:FindFirstChild("Origin")
-		if originPart then
-			local dist = (Vector2.new(hitPos.X, hitPos.Z) - Vector2.new(originPart.Position.X, originPart.Position.Z)).Magnitude
-			if dist < 160 then targetPlot = plotModel; break end
-		end
+	for _, pm in ipairs(towersFolder:GetChildren()) do
+		local op = pm.GridParts.Origin
+		if (Vector2.new(hitPos.X, hitPos.Z) - Vector2.new(op.Position.X, op.Position.Z)).Magnitude < 160 then targetPlot = pm; break end
 	end
 
 	if targetPlot then
 		local origin = targetPlot.GridParts.Origin.Position
 		local gx, gz = math.round((hitPos.X-origin.X)/4)*4 + origin.X, math.round((hitPos.Z-origin.Z)/4)*4 + origin.Z
-
-		local rayParams = RaycastParams.new()
-		rayParams.FilterDescendantsInstances = {char, carriedCube}
-		rayParams.FilterType = Enum.RaycastFilterType.Exclude
-		local ray = workspace:Raycast(Vector3.new(gx, 500, gz), Vector3.new(0, -500, 0), rayParams)
+		local ray = workspace:Raycast(Vector3.new(gx, 500, gz), Vector3.new(0, -500, 0))
 
 		if ray then 
-			carriedCube.Position = Vector3.new(gx, ray.Position.Y + 2.1, gz) 
-			local blks = targetPlot:FindFirstChild("Blocks") or Instance.new("Folder", targetPlot); blks.Name = "Blocks"
-			carriedCube.Parent = blks
-
-			if ray.Instance.Name == "Origin" then
-				carriedCube.Anchored = true
-			else
-				carriedCube.Anchored = false
-				local newWeld = Instance.new("WeldConstraint")
-				newWeld.Part0 = ray.Instance; newWeld.Part1 = carriedCube; newWeld.Parent = carriedCube
-				carriedCube.Massless = true 
-			end
-
-			local plotOwnerID = targetPlot:GetAttribute("OwnerID")
-			if plotOwnerID and plotOwnerID ~= player.UserId then 
-				CreateStealPrompt(carriedCube) 
-			end
+			carriedCube.Position = Vector3.new(gx, ray.Position.Y + 2.1, gz)
+			carriedCube.Parent = targetPlot.Blocks
+			-- FIX FISICA: Solo el primero se ancla
+			if ray.Instance.Name == "Origin" then carriedCube.Anchored = true else carriedCube.Anchored = false end
+			if targetPlot:GetAttribute("OwnerID") ~= player.UserId then CreateStealPrompt(carriedCube) end
 		else 
-			carriedCube.Position = Vector3.new(gx, 4, gz) 
-			carriedCube.Parent = globalCubes 
-			carriedCube.Anchored = false
+			carriedCube.Position=Vector3.new(gx,4,gz); carriedCube.Parent=globalCubes; carriedCube.Anchored=false 
 		end
-	else
-		carriedCube.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, 0, -8)
-		carriedCube.Parent = globalCubes
+	else 
+		carriedCube.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0,0,-5); carriedCube.Parent=globalCubes; carriedCube.Anchored=false 
 	end
-	if carriedCube:FindFirstChild("ProximityPrompt") then carriedCube.ProximityPrompt.Enabled = true end
 end)
 
 -- ==========================================================
@@ -946,8 +871,6 @@ local function OnPlayerJoin(p)
 		end)
 	end)
 
-	-- Cargar personaje si ya existe (caso raro de lag)
-	if p.Character then p.CharacterAdded:Fire(p.Character) end
 end
 
 -- CONECTAR EVENTO
