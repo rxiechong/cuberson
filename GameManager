@@ -56,6 +56,16 @@ local upgradeInvEvent = Remotes:FindFirstChild("UpgradeInventory") or Instance.n
 upgradeInvEvent.Name = "UpgradeInventory"
 local equipInvEvent = Remotes:FindFirstChild("EquipFromInventory") or Instance.new("RemoteEvent", Remotes)
 equipInvEvent.Name = "EquipFromInventory"
+local unstuckEvent = Remotes:FindFirstChild("Unstuck") or Instance.new("RemoteEvent", Remotes)
+unstuckEvent.Name = "Unstuck"
+local requestPickupEvent = Remotes:FindFirstChild("RequestPickupCube") or Instance.new("RemoteEvent", Remotes)
+requestPickupEvent.Name = "RequestPickupCube"
+local storeInBackpackEvent = Remotes:FindFirstChild("StoreInBackpack") or Instance.new("RemoteEvent", Remotes)
+storeInBackpackEvent.Name = "StoreInBackpack"
+local requestMoveEvent = Remotes:FindFirstChild("RequestMoveCube") or Instance.new("RemoteEvent", Remotes)
+requestMoveEvent.Name = "RequestMoveCube"
+local requestStealEvent = Remotes:FindFirstChild("RequestStealCube") or Instance.new("RemoteEvent", Remotes)
+requestStealEvent.Name = "RequestStealCube"
 
 -- ==========================================================
 -- 1. SISTEMA DE PERSISTENCIA (GUARDADO Y CARGA)
@@ -131,23 +141,11 @@ local function LoadPlayerData(player)
 						cube:SetAttribute("Value", foundData.Value)
 						cube:SetAttribute("IsPerma", true)
 
-						-- Visuales
-						local sg = Instance.new("SurfaceGui", cube); sg.Face = Enum.NormalId.Front
+						-- Visuales (legibles como el resto de cubos)
+						local sg = Instance.new("SurfaceGui", cube); sg.Face = Enum.NormalId.Front; sg.PixelsPerStud = 128
 						local t = Instance.new("TextLabel", sg); t.Size = UDim2.new(1,0,1,0); t.Text = foundData.Rarity.."\n"..foundData.Name
-						t.TextScaled = true; t.BackgroundTransparency = 1; t.TextColor3 = Color3.new(1,1,1); t.Font = Enum.Font.FredokaOne
-
-						-- Prompt para Mover
-						local prompt = Instance.new("ProximityPrompt", cube)
-						prompt.ActionText = "MOVER (ETERNO)"
-						prompt.HoldDuration = 0.5
-						prompt.UIOffset = Vector2.new(0, -50)
-
-						prompt.Triggered:Connect(function(interactor)
-							if interactor.UserId == userId then
-								prompt.Enabled = false
-								PickupCube(interactor, cube, foundData.Value)
-							end
-						end)
+						t.TextScaled = false; t.TextSize = 42; t.BackgroundTransparency = 1; t.TextColor3 = Color3.new(1,1,1); t.Font = Enum.Font.FredokaOne; t.TextWrapped = true
+						-- MOVER se usa desde el HUD (RequestMoveCube), no ProximityPrompt en el cubo
 					end
 				end
 			end
@@ -247,11 +245,9 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 			cube.Material = data.Mat; cube.Color = data.Color
 			cube:SetAttribute("Owner", player.UserId); cube:SetAttribute("Value", 200); cube:SetAttribute("IsPerma", true)
 
-			-- Pickup forzado
-			player:SetAttribute("Carrying", true); player:SetAttribute("CarryingValue", 200)
-			cube.CanCollide = false; cube.Anchored = false; cube.Parent = player.Character
-			local w = Instance.new("WeldConstraint", cube); w.Part0 = player.Character.HumanoidRootPart; w.Part1 = cube
-			cube.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 5)
+			-- Pickup forzado usando la misma lógica que el resto
+			cube.Parent = workspace
+			PickupCube(player, cube, 200)
 
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
@@ -323,19 +319,10 @@ end
 function PickupCube(player, cube, val)
 	if not cube or not cube.Parent then return false end
 
-	-- A. MOCHILA (Si ya llevas algo)
+	-- Si ya llevas un cubo en la mano no puedes recoger otro (hay que soltar o guardar en mochila)
 	if player:GetAttribute("Carrying") then 
-		local inv = player:FindFirstChild("Inventory")
-		local maxSlots = player:GetAttribute("MaxSlots") or 4
-		if inv and #inv:GetChildren() < maxSlots then
-			cube.CanCollide=false; cube.Anchored=true; cube.Transparency=1; cube.CFrame=CFrame.new(0,-500,0)
-			cube.Parent=inv; cube:SetAttribute("Owner", player.UserId)
-			eventMessage:FireClient(player, "🎒 Guardado: "..cube.Name)
-			return true
-		else
-			eventMessage:FireClient(player, "❌ ¡Mochila Llena!")
-			return false
-		end
+		eventMessage:FireClient(player, "❌ Suelta o guarda el cubo en la mochila primero.")
+		return false
 	end
 
 	-- B. MANO (FIX FÍSICA AGRESIVA)
@@ -349,20 +336,33 @@ function PickupCube(player, cube, val)
 	cube.CustomPhysicalProperties = nil -- BORRAR DENSIDAD (Esto arregla el caerse al piso)
 	cube.CollisionGroup = "CarriedCube" 
 
-	-- 2. POSICIONAR Y SOLDAR
-	cube.Parent = player.Character -- Mover al pj
+	-- Resetear velocidades para evitar tirones y empujones raros
+	if cube:IsA("BasePart") then
+		cube.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		cube.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+	end
 
-	-- Limpiar welds viejos
-	for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
+	-- 2. POSICIONAR Y SOLDAR (orden crítico: posición primero, weld después)
+	local hrp = player.Character.HumanoidRootPart
+	cube.Parent = player.Character
 
-	local w = Instance.new("WeldConstraint", cube)
-	w.Name = "CarryingWeld"
-	w.Part0 = player.Character.HumanoidRootPart
-	w.Part1 = cube
-	w.Parent = cube
+	-- Limpiar welds viejos antes de posicionar
+	for _, w in ipairs(cube:GetChildren()) do
+		if w:IsA("WeldConstraint") or w:IsA("Weld") then w:Destroy() end
+	end
 
-	-- Posición frente al pecho
-	cube.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -3.5)
+	-- Posición en manos: delante del pecho, altura de brazos (en espacio del personaje)
+	local offset = CFrame.new(0, 1.2, -2.2)
+	cube.CFrame = hrp.CFrame * offset
+
+	-- Usar Weld clásico con C0/C1 para que el offset quede fijo y no se pierda con red/física
+	local weld = Instance.new("Weld", cube)
+	weld.Name = "CarryingWeld"
+	weld.Part0 = hrp
+	weld.Part1 = cube
+	weld.C0 = offset
+	weld.C1 = CFrame.new(0, 0, 0)
+	weld.Parent = cube
 
 	-- Desactivar Prompt
 	local p = cube:FindFirstChild("ProximityPrompt"); if p then p.Enabled = false end
@@ -390,29 +390,190 @@ function PickupCube(player, cube, val)
 end
 
 
--- Sacar item de mochila
-equipInvEvent.OnServerEvent:Connect(function(player)
-	if player:GetAttribute("Carrying") then return end
+-- Sacar item de mochila (slotIndex 1-based). Si ya llevas cubo, se intercambia.
+equipInvEvent.OnServerEvent:Connect(function(player, slotIndex)
 	local inv = player:FindFirstChild("Inventory")
-	if inv and #inv:GetChildren() > 0 then
-		local items = inv:GetChildren()
-		local cube = items[#items] -- Sacar el último
+	if not inv then return end
+	local items = inv:GetChildren()
+	if #items == 0 then return end
 
-		cube.Transparency = 0
-		cube.Anchored = false
+	local idx = (type(slotIndex) == "number" and slotIndex > 0 and slotIndex <= #items) and slotIndex or #items
+	local cube = items[idx]
+	if not cube or not cube:IsA("BasePart") then return end
 
-		player:SetAttribute("Carrying", true)
-		player:SetAttribute("CarryingValue", cube:GetAttribute("Value"))
+	-- Si ya llevas un cubo, guardarlo en la mochila primero (intercambio)
+	if player:GetAttribute("Carrying") then
+		local maxSlots = player:GetAttribute("MaxSlots") or SETTINGS.BASE_SLOTS
+		if #items >= maxSlots then
+			eventMessage:FireClient(player, "❌ ¡Mochila llena! Suelta el cubo primero.")
+			return
+		end
+		local carriedCube = nil
+		for _, c in ipairs(player.Character:GetChildren()) do
+			if c:FindFirstChild("CarryingWeld") then carriedCube = c; break end
+		end
+		if carriedCube then
+			local weld = carriedCube:FindFirstChild("CarryingWeld")
+			if weld then weld:Destroy() end
+			player:SetAttribute("Carrying", false)
+			carriedCube.CanCollide = false
+			carriedCube.Anchored = true
+			carriedCube.Transparency = 1
+			carriedCube.CFrame = CFrame.new(0, -500, 0)
+			carriedCube.Parent = inv
+			carriedCube:SetAttribute("Owner", player.UserId)
+		end
+	end
 
-		cube.Parent = player.Character
-		local w = Instance.new("WeldConstraint", cube)
-		w.Name = "CarryingWeld"
-		w.Part0 = player.Character.HumanoidRootPart
-		w.Part1 = cube
-		cube.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 5)
-
+	cube.Transparency = 0
+	cube.Anchored = false
+	local ok = PickupCube(player, cube, cube:GetAttribute("Value"))
+	if ok then
 		eventMessage:FireClient(player, "🔼 Equipado: " .. cube.Name)
 	end
+end)
+
+-- Recoger/Comprar cubo desde HUD (sin ProximityPrompt en el cubo)
+requestPickupEvent.OnServerEvent:Connect(function(player, cubePosition)
+	if player:GetAttribute("Carrying") then return end
+	local char = player.Character
+	if not char or not cubePosition then return end
+	local ref = cubePosition and (typeof(cubePosition) == "Vector3") and cubePosition or char.HumanoidRootPart.Position
+	local bestCube, bestDist = nil, 14
+	for _, c in ipairs(globalCubes:GetChildren()) do
+		if c:IsA("BasePart") and c:GetAttribute("Value") ~= nil then
+			local d = (c.Position - ref).Magnitude
+			if d < bestDist then bestCube = c; bestDist = d end
+		end
+	end
+	if not bestCube then return end
+	local owner = bestCube:GetAttribute("Owner") or 0
+	local price = bestCube:GetAttribute("Price") or 0
+	local cost = (owner == player.UserId) and 0 or (owner == 0 and price or price * 3)
+	if not player.leaderstats or player.leaderstats.Cash.Value < cost then return end
+	local val = bestCube:GetAttribute("Value") or 0
+	local ok = PickupCube(player, bestCube, val)
+	if ok then
+		if cost > 0 then player.leaderstats.Cash.Value -= cost end
+		bestCube:SetAttribute("Owner", player.UserId)
+		local p = bestCube:FindFirstChild("ProximityPrompt")
+		if p then p.Enabled = false end
+	end
+end)
+
+-- Buscar cubo cerca de una posición (GlobalCubes, Towers, Altars)
+local function findCubeNearPosition(refPos, maxDist)
+	maxDist = maxDist or 12
+	for _, c in ipairs(globalCubes:GetChildren()) do
+		if c:IsA("BasePart") and c:GetAttribute("Value") ~= nil then
+			if (c.Position - refPos).Magnitude <= maxDist then return c end
+		end
+	end
+	local towers = workspace:FindFirstChild("Towers")
+	if towers then
+		for _, tycoon in ipairs(towers:GetChildren()) do
+			local blocks = tycoon:FindFirstChild("Blocks")
+			if blocks then
+				for _, c in ipairs(blocks:GetChildren()) do
+					if c:IsA("BasePart") and (c.Position - refPos).Magnitude <= maxDist then return c end
+				end
+			end
+		end
+	end
+	for _, altar in ipairs(altarsFolder:GetChildren()) do
+		local blocks = altar:FindFirstChild("Blocks")
+		if blocks then
+			for _, c in ipairs(blocks:GetChildren()) do
+				if c:IsA("BasePart") and (c.Position - refPos).Magnitude <= maxDist then return c end
+			end
+		end
+	end
+	return nil
+end
+
+-- MOVER: recoger mi cubo (en torre/altar) sin pagar
+requestMoveEvent.OnServerEvent:Connect(function(player, cubePosition)
+	if player:GetAttribute("Carrying") then return end
+	local char = player.Character
+	if not char or not cubePosition or typeof(cubePosition) ~= "Vector3" then return end
+	local cube = findCubeNearPosition(cubePosition, 14)
+	if not cube then return end
+	local owner = cube:GetAttribute("Owner") or 0
+	if owner ~= player.UserId then return end
+	local val = cube:GetAttribute("Value") or 0
+	local ok = PickupCube(player, cube, val)
+	if ok then eventMessage:FireClient(player, "🔼 Movido: " .. cube.Name) end
+end)
+
+-- ROBAR: pagar 3x precio y quedarse con el cubo de otro
+requestStealEvent.OnServerEvent:Connect(function(player, cubePosition)
+	if player:GetAttribute("Carrying") then return end
+	local char = player.Character
+	if not char or not cubePosition or typeof(cubePosition) ~= "Vector3" then return end
+	local cube = findCubeNearPosition(cubePosition, 14)
+	if not cube then return end
+	local owner = cube:GetAttribute("Owner") or 0
+	if owner == player.UserId then return end
+	if cube:GetAttribute("IsPerma") then return end
+	local price = cube:GetAttribute("Price") or 100
+	local stealCost = price * 3
+	if not player.leaderstats or player.leaderstats.Cash.Value < stealCost then
+		eventMessage:FireClient(player, "❌ Necesitas $" .. stealCost .. " para robar.")
+		return
+	end
+	player.leaderstats.Cash.Value -= stealCost
+	local stealP = cube:FindFirstChild("StealPrompt")
+	if stealP then stealP:Destroy() end
+	for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") or w:IsA("Weld") then w:Destroy() end end
+	cube.Anchored = false
+	cube:SetAttribute("Owner", player.UserId)
+	cube:SetAttribute("TeamOwner", nil)
+	local val = cube:GetAttribute("Value") or 0
+	PickupCube(player, cube, val)
+	eventMessage:FireClient(player, "💰 Robado: " .. cube.Name)
+end)
+
+-- Guardar cubo de la mano en la mochila
+storeInBackpackEvent.OnServerEvent:Connect(function(player)
+	if not player:GetAttribute("Carrying") then return end
+	local inv = player:FindFirstChild("Inventory")
+	local maxSlots = player:GetAttribute("MaxSlots") or SETTINGS.BASE_SLOTS
+	if not inv or #inv:GetChildren() >= maxSlots then
+		eventMessage:FireClient(player, "❌ ¡Mochila llena!")
+		return
+	end
+	local carriedCube = nil
+	for _, c in ipairs(player.Character:GetChildren()) do
+		if c:FindFirstChild("CarryingWeld") then carriedCube = c; break end
+	end
+	if not carriedCube then return end
+	local weld = carriedCube:FindFirstChild("CarryingWeld")
+	if weld then weld:Destroy() end
+	player:SetAttribute("Carrying", false)
+	carriedCube.CanCollide = false
+	carriedCube.Anchored = true
+	carriedCube.Transparency = 1
+	carriedCube.CFrame = CFrame.new(0, -500, 0)
+	carriedCube.Parent = inv
+	carriedCube:SetAttribute("Owner", player.UserId)
+	eventMessage:FireClient(player, "🎒 Guardado: " .. carriedCube.Name)
+end)
+
+-- Botón "desatascar": teleporta al jugador al lado del letrero de su base
+unstuckEvent.OnServerEvent:Connect(function(player)
+	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+	local tycoon = towersFolder:FindFirstChild("Tycoon_"..player.UserId)
+	if not tycoon then return end
+
+	local board = tycoon:FindFirstChild("Board")
+	if not board then return end
+
+	local hrp = player.Character.HumanoidRootPart
+	-- Posición segura: unos studs delante del letrero y un poco elevada
+	local forward = board.CFrame.LookVector
+	local targetPos = board.Position + forward * -8 + Vector3.new(0, 5, 0)
+
+	hrp.CFrame = CFrame.new(targetPos, targetPos + forward)
 end)
 
 -- ==========================================================
@@ -430,7 +591,8 @@ function CreateStealPrompt(cube)
 	local p = Instance.new("ProximityPrompt", cube)
 	p.Name = "StealPrompt"
 	p.ActionText = "ROBAR ($".. stealCost ..")"
-	p.HoldDuration = 2 -- Toma tiempo robar
+	p.HoldDuration = 2
+	p.Enabled = false -- Se usa desde el HUD (RequestStealCube), no el prompt en el cubo
 
 	p.Triggered:Connect(function(interactor)
 		-- Verificar que NO sea el dueño (El dueño usa Recoger normal si quiere)
@@ -440,8 +602,8 @@ function CreateStealPrompt(cube)
 			interactor.leaderstats.Cash.Value -= stealCost
 			p:Destroy() -- Quitar prompt
 
-			-- Liberar cubo físicamente
-			for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") then w:Destroy() end end
+			-- Liberar cubo físicamente (quitar weld de agarre, sea Weld o WeldConstraint)
+			for _, w in ipairs(cube:GetChildren()) do if w:IsA("WeldConstraint") or w:IsA("Weld") then w:Destroy() end end
 			cube.Anchored = false
 
 			-- CAMBIAR DUEÑO AL LADRÓN
@@ -496,27 +658,39 @@ function SpawnCube(customData)
 		end)
 	end
 
-	-- ETIQUETAS VISUALES
-	local function makeTxt(f, txt, col) 
-		local sg=Instance.new("SurfaceGui",cube); sg.Face=f
-		local l=Instance.new("TextLabel",sg); l.Size=UDim2.new(1,0,1,0); l.Text=txt; l.TextScaled=true; l.TextColor3=col; l.BackgroundTransparency=1; l.Font=Enum.Font.FredokaOne
-		return l 
+	-- ETIQUETAS VISUALES: alta resolución para que se lea bien; cada cara usa todo el espacio
+	local function makeTxt(f, txt, col, useScaled)
+		local sg = Instance.new("SurfaceGui", cube)
+		sg.Face = f
+		sg.PixelsPerStud = 128
+		sg.ClipsDescendants = false
+		local l = Instance.new("TextLabel", sg)
+		l.Size = UDim2.new(1, 0, 1, 0)
+		l.Text = txt
+		l.TextColor3 = col
+		l.BackgroundTransparency = 1
+		l.Font = Enum.Font.FredokaOne
+		l.TextScaled = (useScaled == true)
+		if not useScaled then l.TextSize = 42 end
+		l.TextWrapped = true
+		return l
 	end
-	makeTxt(Enum.NormalId.Front, data.Rarity.."\n"..data.Name, Color3.new(1,1,1))
+	-- Cara frontal: Rarity + Nombre bien legibles (texto fijo grande)
+	makeTxt(Enum.NormalId.Front, data.Rarity .. "\n" .. data.Name, Color3.new(1, 1, 1), false)
 
-	-- ETIQUETA VALOR (CARA SUPERIOR - PUNTO 2)
-	local valLabel = makeTxt(Enum.NormalId.Top, "", Color3.new(0,1,0))
+	-- Cara superior: $/s ocupa toda la cara
+	local valLabel = makeTxt(Enum.NormalId.Top, "", Color3.new(0,1,0), true)
 	task.spawn(function()
 		while cube and cube.Parent do
 			local currentVal = cube:GetAttribute("Value") or 0
-			valLabel.Text = (currentVal >= 0 and "+$" or "$")..currentVal.."/s"
+			valLabel.Text = (currentVal >= 0 and "+$" or "$") .. currentVal .. "/s"
 			valLabel.TextColor3 = currentVal >= 0 and Color3.new(0,1,0) or Color3.new(1,0,0)
 			task.wait(1)
 		end
 	end)
 
-	-- ETIQUETA TIMER / DUEÑO
-	local infoLabel = makeTxt(Enum.NormalId.Right, "...", Color3.new(1,1,0))
+	-- Cara derecha: timer o dueño ocupa toda la cara
+	local infoLabel = makeTxt(Enum.NormalId.Right, "...", Color3.new(1,1,0), true)
 	task.spawn(function()
 		local timeLeft = SETTINGS.CUBE_LIFETIME
 		while cube and cube.Parent do
@@ -535,24 +709,7 @@ function SpawnCube(customData)
 		end
 	end)
 
-	-- PROMPT (PUNTO 3: UIOffset para no tapar)
-	local prompt = Instance.new("ProximityPrompt", cube); prompt.HoldDuration = 0.1
-	prompt.ActionText = data.Price > 0 and ("COMPRAR $"..data.Price) or "RECOGER"
-	prompt.UIOffset = Vector2.new(0, -50) -- BAJAR EL PROMPT PARA VER EL TEXTO
-
-	prompt.Triggered:Connect(function(plr)
-		local owner = cube:GetAttribute("Owner") or 0
-		local cost = (owner == plr.UserId) and 0 or (owner == 0 and data.Price or data.Price * 3)
-
-		if plr.leaderstats.Cash.Value >= cost then
-			local success = PickupCube(plr, cube, data.Value)
-			if success then
-				if cost > 0 then plr.leaderstats.Cash.Value -= cost end
-				cube:SetAttribute("Owner", plr.UserId)
-				prompt.Enabled = false 
-			end
-		end
-	end)
+	-- Sin ProximityPrompt aquí: recoger/comprar se hace desde el HUD (tecla E) vía RequestPickupCube
 	return cube
 end
 
@@ -577,6 +734,11 @@ placeEvent.OnServerEvent:Connect(function(player, hitPos)
 		else return end
 	end
 
+	-- Guardar la posición actual del cubo antes de soltarlo.
+	-- Esto permite que el clic solo sea "disparador" y no cambie
+	-- la posición: se soltará donde lo estás sujetando.
+	local dropPos = carriedCube.Position
+
 	-- Soltar y Restaurar Física
 	local weld = carriedCube:FindFirstChild("CarryingWeld"); if weld then weld:Destroy() end
 	player:SetAttribute("Carrying", false)
@@ -589,35 +751,17 @@ placeEvent.OnServerEvent:Connect(function(player, hitPos)
 		if rp then rp.ActionText = "RECICLAR" end
 	end
 
-	-- [[ FIX PROMPTS: Lógica Específica para Permablocks ]]
+	-- MOVER/ROBAR se usan desde el HUD; no mostramos ProximityPrompt en el cubo
 	local isPerma = carriedCube:GetAttribute("IsPerma")
 	local p = carriedCube:FindFirstChild("ProximityPrompt")
+	if p then p.Enabled = false end
+	if not isPerma then CreateStealPrompt(carriedCube) end
 
-	if p then 
-		p.Enabled = true
-		if isPerma then p.ActionText = "MOVER (ETERNO)" else p.ActionText = "MOVER" end
-	else
-		-- Si no tiene prompt (ej: venía de mochila), crear lógica de robo SOLO si no es Perma
-		if not isPerma then
-			CreateStealPrompt(carriedCube)
-		elseif isPerma and carriedCube:GetAttribute("Owner") == player.UserId then
-			-- Si es perma y soy el dueño, crear prompt de movimiento
-			local newP = Instance.new("ProximityPrompt", carriedCube)
-			newP.ActionText = "MOVER (ETERNO)"; newP.HoldDuration = 0.5; newP.UIOffset = Vector2.new(0, -50)
-			newP.Triggered:Connect(function(interactor)
-				if interactor.UserId == player.UserId then
-					newP.Enabled = false
-					PickupCube(interactor, carriedCube, carriedCube:GetAttribute("Value"))
-				end
-			end)
-		end
-	end
-
-	-- A. ALTAR CHECK
+	-- A. ALTAR CHECK (usando la posición donde realmente está el cubo)
 	for _, altar in ipairs(altarsFolder:GetChildren()) do
 		local base = altar:FindFirstChild("Base")
-		if base and (Vector2.new(hitPos.X, hitPos.Z) - Vector2.new(base.Position.X, base.Position.Z)).Magnitude < (SETTINGS.ALTAR_RADIUS + 5) then 
-			carriedCube.Position = Vector3.new(hitPos.X, hitPos.Y+2, hitPos.Z)
+		if base and (Vector2.new(dropPos.X, dropPos.Z) - Vector2.new(base.Position.X, base.Position.Z)).Magnitude < (SETTINGS.ALTAR_RADIUS + 5) then 
+			carriedCube.Position = Vector3.new(dropPos.X, dropPos.Y+2, dropPos.Z)
 			carriedCube.Anchored = false 
 			carriedCube.Parent = altar.Blocks
 
@@ -628,20 +772,29 @@ placeEvent.OnServerEvent:Connect(function(player, hitPos)
 		end
 	end
 
-	-- B. TOWER CHECK
+	-- B. TOWER CHECK (también basado en la posición real del cubo)
 	local targetPlot = nil
 	for _, pm in ipairs(towersFolder:GetChildren()) do
 		local op = pm.GridParts.Origin
-		if (Vector2.new(hitPos.X, hitPos.Z) - Vector2.new(op.Position.X, op.Position.Z)).Magnitude < 160 then targetPlot = pm; break end
+		if (Vector2.new(dropPos.X, dropPos.Z) - Vector2.new(op.Position.X, op.Position.Z)).Magnitude < 160 then targetPlot = pm; break end
 	end
 
 	if targetPlot then
 		local origin = targetPlot.GridParts.Origin.Position
-		local gx, gz = math.round((hitPos.X-origin.X)/4)*4 + origin.X, math.round((hitPos.Z-origin.Z)/4)*4 + origin.Z
+		local gx, gz = math.round((dropPos.X-origin.X)/4)*4 + origin.X, math.round((dropPos.Z-origin.Z)/4)*4 + origin.Z
 		local ray = workspace:Raycast(Vector3.new(gx, 500, gz), Vector3.new(0, -500, 0))
 
 		if ray then 
-			carriedCube.Position = Vector3.new(gx, ray.Position.Y + 2.1, gz)
+			-- Si clicaste sobre otro cubo de la torre, apilar exactamente encima.
+			local hitPart = ray.Instance
+			if hitPart and hitPart:IsDescendantOf(targetPlot) and hitPart ~= carriedCube then
+				local topY = hitPart.Position.Y + (hitPart.Size.Y / 2)
+				local ownHalf = carriedCube.Size.Y / 2
+				carriedCube.Position = Vector3.new(hitPart.Position.X, topY + ownHalf + 0.05, hitPart.Position.Z)
+			else
+				-- Caso general: usar el snap de grilla como antes.
+				carriedCube.Position = Vector3.new(gx, ray.Position.Y + 2.1, gz)
+			end
 			carriedCube.Parent = targetPlot.Blocks
 
 			-- [[ FIX FÍSICA: Gravedad afecta a TODOS (Incluso Eternos) ]]

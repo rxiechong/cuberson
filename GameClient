@@ -1,23 +1,226 @@
--- [[ SCRIPT DE CLIENTE - v25.0 ]]
+-- [[ HUD de interacción: recoger, comprar, mover, robar, soltar. [E] + botón TAP para móvil ]]
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
-local mouse = player:GetMouse()
-local placeEvent = game:GetService("ReplicatedStorage"):WaitForChild("ViralRemotes"):WaitForChild("PlaceCube")
 
-local sg = Instance.new("ScreenGui", player.PlayerGui)
-local f = Instance.new("Frame", sg); f.Size = UDim2.new(0,350,0,100); f.Position = UDim2.new(0.5,-175, 0.85, 0); f.BackgroundColor3 = Color3.new(0,0,0); f.BackgroundTransparency = 0.5
-local corner = Instance.new("UICorner", f)
-local t = Instance.new("TextLabel", f); t.Size = UDim2.new(1,0,1,0); t.TextScaled = true; t.TextColor3 = Color3.new(1,1,1); t.BackgroundTransparency = 1; t.Text = "VIRAL TYCOON V25"
+local Remotes = ReplicatedStorage:WaitForChild("ViralRemotes")
+local placeEvent = Remotes:WaitForChild("PlaceCube")
+local requestPickupEvent = Remotes:WaitForChild("RequestPickupCube")
+local requestMoveEvent = Remotes:WaitForChild("RequestMoveCube")
+local requestStealEvent = Remotes:WaitForChild("RequestStealCube")
 
-mouse.Button1Down:Connect(function() 
-	placeEvent:FireServer(mouse.Hit.Position) 
+local INTERACT_RANGE = 14
+local DROP_KEY = Enum.KeyCode.E
+
+-- Tipos de acción para el HUD
+local ACTION_DROP = "drop"
+local ACTION_PICKUP = "pickup"
+local ACTION_MOVE = "move"
+local ACTION_STEAL = "steal"
+
+local currentAction = nil
+local currentTargetPos = nil
+local currentStealCost = 0
+
+-- GUI
+local sg = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+sg.Name = "ActionHUD"
+sg.ResetOnSpawn = false
+
+local actionFrame = Instance.new("Frame", sg)
+actionFrame.Size = UDim2.new(0, 340, 0, 100)
+actionFrame.Position = UDim2.new(0.5, -170, 0.76, 0)
+actionFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+actionFrame.BackgroundTransparency = 0.35
+local actionCorner = Instance.new("UICorner", actionFrame)
+actionCorner.CornerRadius = UDim.new(0, 12)
+
+local actionLabel = Instance.new("TextLabel", actionFrame)
+actionLabel.Size = UDim2.new(1, -100, 0, 38)
+actionLabel.Position = UDim2.new(0, 12, 0, 8)
+actionLabel.BackgroundTransparency = 1
+actionLabel.Text = ""
+actionLabel.TextColor3 = Color3.new(1, 1, 1)
+actionLabel.Font = Enum.Font.FredokaOne
+actionLabel.TextSize = 20
+actionLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local hintLabel = Instance.new("TextLabel", actionFrame)
+hintLabel.Size = UDim2.new(1, -100, 0, 26)
+hintLabel.Position = UDim2.new(0, 12, 0, 46)
+hintLabel.BackgroundTransparency = 1
+hintLabel.Text = ""
+hintLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+hintLabel.Font = Enum.Font.Code
+hintLabel.TextSize = 16
+hintLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Botón TAP para móvil (icono claro de tocar)
+local tapBtn = Instance.new("TextButton", actionFrame)
+tapBtn.Name = "TapButton"
+tapBtn.Size = UDim2.new(0, 72, 0, 72)
+tapBtn.Position = UDim2.new(1, -80, 0.5, -36)
+tapBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+tapBtn.Text = "👆\nTOCAR"
+tapBtn.Font = Enum.Font.FredokaOne
+tapBtn.TextSize = 14
+tapBtn.TextColor3 = Color3.new(1, 1, 1)
+tapBtn.TextWrapped = true
+local tapCorner = Instance.new("UICorner", tapBtn)
+tapCorner.CornerRadius = UDim.new(0, 12)
+
+actionFrame.Visible = false
+
+-- Ejecutar la acción actual (soltar, recoger, mover, robar)
+local function doCurrentAction()
+	if not currentAction then return end
+	if currentAction == ACTION_DROP and currentTargetPos then
+		placeEvent:FireServer(currentTargetPos)
+	elseif currentAction == ACTION_PICKUP and currentTargetPos then
+		requestPickupEvent:FireServer(currentTargetPos)
+	elseif currentAction == ACTION_MOVE and currentTargetPos then
+		requestMoveEvent:FireServer(currentTargetPos)
+	elseif currentAction == ACTION_STEAL and currentTargetPos then
+		requestStealEvent:FireServer(currentTargetPos)
+	end
+end
+
+tapBtn.MouseButton1Click:Connect(doCurrentAction)
+
+-- Cubo más cercano en GlobalCubes (recoger/comprar)
+local function getNearestGlobalCube()
+	local char = player.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return nil, 999 end
+	local hrp = char.HumanoidRootPart
+	local globalCubes = workspace:FindFirstChild("GlobalCubes")
+	if not globalCubes then return nil, 999 end
+	local nearest, dist = nil, INTERACT_RANGE
+	for _, c in ipairs(globalCubes:GetChildren()) do
+		if c:IsA("BasePart") and c:GetAttribute("Value") ~= nil then
+			local d = (c.Position - hrp.Position).Magnitude
+			if d < dist then nearest = c; dist = d end
+		end
+	end
+	return nearest, dist
+end
+
+-- Cubo más cercano en Blocks (torres o altares) para MOVER/ROBAR
+local function getNearestBlockCube()
+	local char = player.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return nil, 999 end
+	local hrp = char.HumanoidRootPart
+	local nearest, dist = nil, INTERACT_RANGE
+	local towers = workspace:FindFirstChild("Towers")
+	if towers then
+		for _, tycoon in ipairs(towers:GetChildren()) do
+			local blocks = tycoon:FindFirstChild("Blocks")
+			if blocks then
+				for _, c in ipairs(blocks:GetChildren()) do
+					if c:IsA("BasePart") and c:GetAttribute("Value") ~= nil then
+						local d = (c.Position - hrp.Position).Magnitude
+						if d < dist then nearest = c; dist = d end
+					end
+				end
+			end
+		end
+	end
+	local altars = workspace:FindFirstChild("Altars")
+	if altars then
+		for _, altar in ipairs(altars:GetChildren()) do
+			local blocks = altar:FindFirstChild("Blocks")
+			if blocks then
+				for _, c in ipairs(blocks:GetChildren()) do
+					if c:IsA("BasePart") and c:GetAttribute("Value") ~= nil then
+						local d = (c.Position - hrp.Position).Magnitude
+						if d < dist then nearest = c; dist = d end
+					end
+				end
+			end
+		end
+	end
+	return nearest, dist
+end
+
+local function getCarriedCube()
+	local char = player.Character
+	if not char then return nil end
+	for _, c in ipairs(char:GetChildren()) do
+		if c:FindFirstChild("CarryingWeld") then return c end
+	end
+	return nil
+end
+
+-- Actualizar HUD cada frame
+RunService.RenderStepped:Connect(function()
+	currentAction = nil
+	currentTargetPos = nil
+	currentStealCost = 0
+
+	local carrying = player:GetAttribute("Carrying")
+	local carried = getCarriedCube()
+
+	if carrying and carried then
+		currentAction = ACTION_DROP
+		currentTargetPos = carried.Position
+		actionFrame.Visible = true
+		actionLabel.Text = "Llevas: " .. (carried.Name or "Cubo")
+		actionLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+		hintLabel.Text = "[E] SOLTAR CUBO  ·  👆 TOCAR"
+	else
+		local gCube, gDist = getNearestGlobalCube()
+		local bCube, bDist = getNearestBlockCube()
+		-- Prioridad: el más cercano; si empatan, preferir Blocks (mover/robar)
+		local useBlock = (bCube and bDist <= INTERACT_RANGE) and (not gCube or bDist <= gDist)
+		if useBlock and bCube then
+			local owner = bCube:GetAttribute("Owner") or 0
+			currentTargetPos = bCube.Position
+			if owner == player.UserId then
+				currentAction = ACTION_MOVE
+				actionFrame.Visible = true
+				actionLabel.Text = bCube.Name .. "  ·  $" .. (bCube:GetAttribute("Value") or 0) .. "/s"
+				actionLabel.TextColor3 = Color3.new(1, 1, 1)
+				hintLabel.Text = "[E] MOVER  ·  👆 TOCAR"
+			else
+				local price = bCube:GetAttribute("Price") or 100
+				local cost = price * 3
+				if not bCube:GetAttribute("IsPerma") then
+					currentAction = ACTION_STEAL
+					currentStealCost = cost
+					actionFrame.Visible = true
+					actionLabel.Text = bCube.Name .. "  ·  ROBAR $" .. cost
+					actionLabel.TextColor3 = Color3.fromRGB(255, 180, 80)
+					hintLabel.Text = "[E] ROBAR ($" .. cost .. ")  ·  👆 TOCAR"
+				else
+					actionFrame.Visible = false
+				end
+			end
+		elseif gCube and gDist < INTERACT_RANGE then
+			currentAction = ACTION_PICKUP
+			currentTargetPos = gCube.Position
+			local val = gCube:GetAttribute("Value") or 0
+			local price = gCube:GetAttribute("Price") or 0
+			local owner = gCube:GetAttribute("Owner") or 0
+			local isFree = (owner == 0 and price == 0) or owner == player.UserId
+			actionFrame.Visible = true
+			actionLabel.Text = gCube.Name .. "  ·  " .. (val >= 0 and "+" or "") .. "$" .. val .. "/s"
+			actionLabel.TextColor3 = val >= 0 and Color3.new(1, 1, 1) or Color3.new(1, 0.4, 0.4)
+			if isFree then
+				hintLabel.Text = "[E] RECOGER  ·  👆 TOCAR"
+			else
+				local cost = owner == 0 and price or price * 3
+				hintLabel.Text = "[E] COMPRAR $" .. cost .. "  ·  👆 TOCAR"
+			end
+		else
+			actionFrame.Visible = false
+		end
+	end
 end)
 
-game:GetService("RunService").RenderStepped:Connect(function()
-	local isCarrying = player:GetAttribute("Carrying")
-	if isCarrying then 
-		t.Text = "CUBO PROTEGIDO\nCLIC PARA APILAR" t.TextColor3 = Color3.new(0,255,100)
-	else 
-		t.Text = "TIMER FIX: ACTIVO\nLOS CUBOS YA NO DESAPARECEN" t.TextColor3 = Color3.new(255,255,255) 
-	end
+-- Tecla E = misma acción que el botón TOCAR
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode ~= DROP_KEY then return end
+	doCurrentAction()
 end)

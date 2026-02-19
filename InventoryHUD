@@ -10,7 +10,11 @@ local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("ViralRemotes")
 local upgradeFunc = Remotes:WaitForChild("UpgradeInventory")
 local equipEvent = Remotes:WaitForChild("EquipFromInventory")
+local storeInBackpackEvent = Remotes:WaitForChild("StoreInBackpack")
+local unstuckEvent = Remotes:WaitForChild("Unstuck")
 local MarketNews = ReplicatedStorage:WaitForChild("MarketNews")
+
+local BASE_RADIUS = 180 -- Solo mostrar DESATASCAR dentro de este radio de tu base
 
 -- === 1. CREAR LA INTERFAZ (GUI) ===
 local sg = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
@@ -30,8 +34,8 @@ local tCorner = Instance.new("UICorner", toggleBtn); tCorner.CornerRadius = UDim
 -- FRAME PRINCIPAL (MOCHILA)
 local mainFrame = Instance.new("Frame", sg)
 mainFrame.Name = "BackpackFrame"
-mainFrame.Size = UDim2.new(0, 220, 0, 320)
-mainFrame.Position = UDim2.new(0, 70, 0.5, -160) 
+mainFrame.Size = UDim2.new(0, 260, 0, 380)
+mainFrame.Position = UDim2.new(0, 70, 0.5, -190) 
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 mainFrame.BorderSizePixel = 0
 mainFrame.Visible = false
@@ -39,35 +43,49 @@ local corner = Instance.new("UICorner", mainFrame); corner.CornerRadius = UDim.n
 
 -- TÍTULO
 local title = Instance.new("TextLabel", mainFrame)
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Size = UDim2.new(1, 0, 0, 36)
 title.BackgroundTransparency = 1
 title.Text = "MOCHILA"
 title.Font = Enum.Font.FredokaOne
-title.TextSize = 24
+title.TextSize = 22
 title.TextColor3 = Color3.new(1,1,1)
 
 local closeBtn = Instance.new("TextButton", mainFrame)
-closeBtn.Size = UDim2.new(0, 30, 0, 30)
-closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -32, 0, 4)
 closeBtn.BackgroundTransparency = 1
 closeBtn.Text = "X"
 closeBtn.TextColor3 = Color3.new(1, 0, 0)
 closeBtn.Font = Enum.Font.FredokaOne
-closeBtn.TextSize = 20
+closeBtn.TextSize = 18
 
+-- Slots (cuadrados con nombre y $/s)
 local itemsFrame = Instance.new("ScrollingFrame", mainFrame)
-itemsFrame.Size = UDim2.new(1, -20, 1, -100)
-itemsFrame.Position = UDim2.new(0, 10, 0, 40)
+itemsFrame.Size = UDim2.new(1, -16, 1, -155)
+itemsFrame.Position = UDim2.new(0, 8, 0, 38)
 itemsFrame.BackgroundTransparency = 1
 itemsFrame.ScrollBarThickness = 4
-local layout = Instance.new("UIListLayout", itemsFrame); layout.Padding = UDim.new(0, 5)
+local layout = Instance.new("UIListLayout", itemsFrame)
+layout.Padding = UDim.new(0, 6)
+
+-- Botón GUARDAR EN MOCHILA (cubo de la mano -> mochila)
+local storeBtn = Instance.new("TextButton", mainFrame)
+storeBtn.Name = "StoreInBackpackBtn"
+storeBtn.Size = UDim2.new(1, -16, 0, 42)
+storeBtn.Position = UDim2.new(0, 8, 1, -108)
+storeBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 80)
+storeBtn.Text = "📥 GUARDAR EN MOCHILA"
+storeBtn.Font = Enum.Font.FredokaOne
+storeBtn.TextSize = 16
+storeBtn.TextColor3 = Color3.new(1,1,1)
+local storeCorner = Instance.new("UICorner", storeBtn); storeCorner.CornerRadius = UDim.new(0, 6)
 
 local upBtn = Instance.new("TextButton", mainFrame)
-upBtn.Size = UDim2.new(1, -20, 0, 45)
-upBtn.Position = UDim2.new(0, 10, 1, -55)
+upBtn.Size = UDim2.new(1, -16, 0, 42)
+upBtn.Position = UDim2.new(0, 8, 1, -52)
 upBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
 upBtn.Font = Enum.Font.FredokaOne
-upBtn.TextSize = 16
+upBtn.TextSize = 14
 upBtn.TextColor3 = Color3.new(1,1,1)
 local btnCorner = Instance.new("UICorner", upBtn); btnCorner.CornerRadius = UDim.new(0, 6)
 
@@ -115,6 +133,18 @@ spinTimerLbl.TextColor3 = Color3.fromRGB(100, 255, 100)
 spinTimerLbl.TextSize = 14
 spinTimerLbl.Text = "RULETA: LISTA"
 
+-- Botón DESATASCAR (abajo derecha)
+local unstuckBtn = Instance.new("TextButton", sg)
+unstuckBtn.Size = UDim2.new(0, 120, 0, 40)
+unstuckBtn.Position = UDim2.new(1, -130, 1, -50)
+unstuckBtn.AnchorPoint = Vector2.new(0, 0)
+unstuckBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+unstuckBtn.Text = "DESATASCAR"
+unstuckBtn.Font = Enum.Font.FredokaOne
+unstuckBtn.TextSize = 16
+unstuckBtn.TextColor3 = Color3.new(1,1,1)
+local ubCorner = Instance.new("UICorner", unstuckBtn); ubCorner.CornerRadius = UDim.new(0, 8)
+
 -- === 2. LÓGICA VISUAL ===
 
 local function ToggleInventory()
@@ -130,29 +160,66 @@ closeBtn.MouseButton1Click:Connect(ToggleInventory)
 
 local function updateInventory()
 	if not mainFrame.Visible then return end
-	-- Limpiar lista anterior
-	for _, c in ipairs(itemsFrame:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+	for _, c in ipairs(itemsFrame:GetChildren()) do c:Destroy() end
 
 	local inv = player:FindFirstChild("Inventory")
 	local maxSlots = player:GetAttribute("MaxSlots") or 4
-	local currentCount = 0
+	local items = inv and inv:GetChildren() or {}
+	local currentCount = #items
 
-	if inv then
-		local items = inv:GetChildren()
-		currentCount = #items
-		for i, item in ipairs(items) do
-			local itemBtn = Instance.new("TextButton", itemsFrame)
-			itemBtn.Size = UDim2.new(1, 0, 0, 30)
-			itemBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-			itemBtn.Text = "  " .. item.Name
-			itemBtn.TextColor3 = Color3.new(1,1,1)
-			itemBtn.Font = Enum.Font.SourceSansBold
-			itemBtn.TextSize = 14
-			itemBtn.TextXAlignment = Enum.TextXAlignment.Left
-			local ic = Instance.new("UICorner", itemBtn); ic.CornerRadius = UDim.new(0,4)
-			itemBtn.MouseButton1Click:Connect(function() equipEvent:FireServer() end)
+	-- Un slot por cada espacio (vacío o con cubo)
+	for i = 1, maxSlots do
+		local slotFrame = Instance.new("TextButton", itemsFrame)
+		slotFrame.Size = UDim2.new(1, 0, 0, 52)
+		slotFrame.Text = ""
+		slotFrame.TextXAlignment = Enum.TextXAlignment.Left
+		slotFrame.TextYAlignment = Enum.TextYAlignment.Top
+		slotFrame.AutoButtonColor = true
+		local slotCorner = Instance.new("UICorner", slotFrame); slotCorner.CornerRadius = UDim.new(0, 6)
+
+		local nameLbl = Instance.new("TextLabel", slotFrame)
+		nameLbl.Size = UDim2.new(1, -12, 0, 22)
+		nameLbl.Position = UDim2.new(0, 8, 0, 4)
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.Font = Enum.Font.FredokaOne
+		nameLbl.TextSize = 16
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local valueLbl = Instance.new("TextLabel", slotFrame)
+		valueLbl.Size = UDim2.new(1, -12, 0, 18)
+		valueLbl.Position = UDim2.new(0, 8, 0, 28)
+		valueLbl.BackgroundTransparency = 1
+		valueLbl.Font = Enum.Font.Code
+		valueLbl.TextSize = 14
+		valueLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+		local item = items[i]
+		local slotIndex = i
+		if item and item:IsA("BasePart") then
+			local val = item:GetAttribute("Value") or 0
+			slotFrame.BackgroundColor3 = Color3.fromRGB(50, 55, 70)
+			nameLbl.Text = item.Name
+			nameLbl.TextColor3 = Color3.new(1, 1, 1)
+			valueLbl.Text = (val >= 0 and "+" or "") .. "$" .. val .. "/s"
+			valueLbl.TextColor3 = val >= 0 and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+			slotFrame.MouseButton1Click:Connect(function() equipEvent:FireServer(slotIndex) end)
+		else
+			slotFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+			nameLbl.Text = "Vacío"
+			nameLbl.TextColor3 = Color3.fromRGB(120, 120, 120)
+			valueLbl.Text = "—"
+			valueLbl.TextColor3 = Color3.fromRGB(100, 100, 100)
+			slotFrame.Active = false
 		end
 	end
+
+	-- Botón guardar: solo activo si llevas cubo
+	local carrying = player:GetAttribute("Carrying")
+	storeBtn.Visible = true
+	storeBtn.Active = carrying
+	storeBtn.BackgroundColor3 = carrying and Color3.fromRGB(80, 160, 80) or Color3.fromRGB(60, 60, 60)
+	storeBtn.TextColor3 = carrying and Color3.new(1,1,1) or Color3.fromRGB(120, 120, 120)
 
 	title.Text = "MOCHILA (" .. currentCount .. "/" .. maxSlots .. ")"
 
@@ -166,6 +233,10 @@ local function updateInventory()
 	end
 end
 
+storeBtn.MouseButton1Click:Connect(function()
+	if player:GetAttribute("Carrying") then storeInBackpackEvent:FireServer() end
+end)
+
 -- FUNCIÓN HELPER: Formato MM:SS
 local function FormatTime(seconds)
 	if seconds <= 0 then return "00:00" end
@@ -176,6 +247,22 @@ end
 
 -- UPDATE DE TIMERS (Cada Frame)
 RunService.RenderStepped:Connect(function()
+	-- 0. Botón DESATASCAR: solo visible en mi base
+	do
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local towers = workspace:FindFirstChild("Towers")
+		local tycoon = towers and towers:FindFirstChild("Tycoon_" .. player.UserId)
+		local origin = tycoon and tycoon:FindFirstChild("GridParts") and tycoon.GridParts:FindFirstChild("Origin")
+		if hrp and origin and typeof(origin.Position) == "Vector3" then
+			local dist = (hrp.Position - origin.Position).Magnitude
+			local radius = type(BASE_RADIUS) == "number" and BASE_RADIUS or 180
+			unstuckBtn.Visible = (type(dist) == "number") and (dist <= radius)
+		else
+			unstuckBtn.Visible = false
+		end
+	end
+
 	-- 1. Actualizar Inventario si está abierto
 	if player:FindFirstChild("Inventory") then updateInventory() end
 
@@ -218,3 +305,10 @@ MarketNews.Changed:Connect(function(newVal)
 	else newsLabel.TextColor3 = Color3.fromRGB(255, 255, 100) end
 end)
 newsLabel.Text = MarketNews.Value
+
+-- DESATASCAR: oculto por defecto hasta que estés en base
+unstuckBtn.Visible = false
+
+unstuckBtn.MouseButton1Click:Connect(function()
+	unstuckEvent:FireServer()
+end)
